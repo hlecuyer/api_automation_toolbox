@@ -1,0 +1,30 @@
+{
+  "credentials": {
+    "helloAsso": {
+      "id": "someid",
+      "secret": "somesecret"
+    }
+    "ovh": {
+      "endpoint": "someOvhEndpoint"
+      "ak": "someApplicationKey",
+      "as": "someApplicationSecret"
+      "ck": "someClientKey"
+    }
+  },
+  "conf": {
+    "helloAsso": {
+      "api_url": "https://api.helloasso.com",
+      "organization_name": "someOrganizationName"
+      "formName": "someFormName",
+      "subscriptionAfter": "2022-01-24"
+    },
+    "cotisation_label": "label2define",
+    "webhook_url": "someZapirWebHook"
+    "ovh": {
+      "mailingList": {
+        "name": "someMailingListeName",
+        "domain": "someDomain2Update"
+      }
+    }
+  }
+}
