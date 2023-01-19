@@ -121,7 +121,7 @@ class SyncHelloAsso:
 
                     date_str = tmp["date"].split("+")[0].split(".")[0]
                     date_subscription = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
-                    date_filter = datetime.strptime(date, "%Y-%m-%d")
+                    date_filter = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
                     if date_subscription >=  date_filter:
                         print("new record")
                         print(item)
@@ -138,7 +138,7 @@ class SyncHelloAsso:
     def UpdateDateConf(self):
         try:
             with open(self.conf_path, "w", encoding='utf8') as jsonfile:
-                self.conf_global["conf"]["helloAsso"]["subscriptionAfter"] = datetime.now().strftime("%Y-%m-%d")
+                self.conf_global["conf"]["helloAsso"]["subscriptionAfter"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
                 json.dump(self.conf_global, jsonfile, indent=2, ensure_ascii=False)
         except Exception as e:
             syslog.syslog(syslog.LOG_ERR, "Failed to update config file with new date {}".format(e) )
@@ -166,3 +166,4 @@ if __name__ == '__main__':
     helloAsso.Run()
 #   standalone call to functio for testing purpose
 #    helloAsso.UpdateDateConf()
+
