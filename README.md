@@ -58,7 +58,7 @@ The following parameters are stored in the configuration file:
 
 ## Running
 
-To run the HelloAsso Automation Tool, simply execute the `main.py` file in the repository directory:
+To run the HelloAsso Automation Tool, simply execute the `helloasso_dump.py` file in the repository directory:
 
 ```
 python helloasso_dump.py --conf path/to//hello-asso-automation-conf.json
