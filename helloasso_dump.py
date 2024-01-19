@@ -82,7 +82,8 @@ class SyncHelloAsso:
         while totalPages>currentPage:
             payload = {
                 'pageIndex': currentPage,
-                'pageSize': '100'
+                'pageSize': '100',
+                'withDetails': True
             }
             url = '{}/v5/organizations/{}/forms/{}/{}/items'.format(self.conf["helloAsso"]["api_url"],self.conf["helloAsso"]["organization_name"],formType,formSlug)
             r = requests.get(url, params=payload, headers=self.headers)
@@ -93,7 +94,7 @@ class SyncHelloAsso:
         return data
 
     def UpdateOvhMailingList(self, mail):
-        try:
+        try:    
             result = self.ovh_client.post('/email/domain/{}/mailingList/{}/subscriber'.format(self.conf["ovh"]["mailingList"]["domain"],self.conf["ovh"]["mailingList"]["name"]),
                 email=mail
                 )
@@ -113,11 +114,10 @@ class SyncHelloAsso:
         for item in data:
             if item["state"] == "Processed":
                 if item["payer"]["email"] not in users:
-                    try:
-                        print("customFields: {}".format(item["customFields"]))
-                    except KeyError:
-                        pass
                     tmp = { "email": item["payer"]["email"], "firstName":  item["user"]["firstName"], "lastName":  item["user"]["lastName"], "date": item["order"]["date"], "cotisation": self.conf["cotisation_label"] }
+                    for fields in item["customFields"]:
+                        print(fields)
+                        tmp[fields["name"]] = fields["answer"]
 
                     date_str = tmp["date"].split("+")[0].split(".")[0]
                     date_subscription = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
