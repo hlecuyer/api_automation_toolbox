@@ -105,26 +105,39 @@ class SyncHelloAsso:
 
     # Extract email, first name and last name from hello asso data and send it
     # to airtable if subscription was made after "subscriptionAfter" variable value
-    def SyncUserToAirtable(self, data, date="2000-01-01"):
+    def SyncUserToAirtable(self, data, date="2000-01-01T00:00:00"):
         users = []
         headers = {
           'content-type': 'application/json'
         }
 
+        first_sub =  self.conf["helloAsso"]["first_sub"]
+        default = self.conf["helloAsso"]["default"]
+
+
         for item in data:
             if item["state"] == "Processed":
                 if item["payer"]["email"] not in users:
-                    tmp = { "email": item["payer"]["email"], "firstName":  item["user"]["firstName"], "lastName":  item["user"]["lastName"], "date": item["order"]["date"], "cotisation": self.conf["cotisation_label"] }
+                    tmp = { "email": item["payer"]["email"], "firstName":  item["user"]["firstName"], "lastName":  item["user"]["lastName"], "date": item["order"]["date"], "cotisation": self.conf["cotisation_label"]}
+                    #print(tmp)
+
                     for fields in item["customFields"]:
-                        print(fields)
                         tmp[fields["name"]] = fields["answer"]
+                    
+                    for key, value in default.items():
+                        if key not in tmp:
+                            tmp[key] = value
 
                     date_str = tmp["date"].split("+")[0].split(".")[0]
                     date_subscription = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
+                    if first_sub in tmp:
+                        if tmp[first_sub] == "Oui":
+                            tmp[first_sub] = date_subscription.strftime("%Y")
+
                     date_filter = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
                     if date_subscription >=  date_filter:
                         print("new record")
-                        print(item)
+                        print(json.dumps(tmp))
                         r = requests.post(self.conf["webhook_url"], data=json.dumps(tmp),  headers=headers)
                         print(r)
                         if r.status_code != 200:

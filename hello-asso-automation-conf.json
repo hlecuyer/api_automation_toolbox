@@ -3,27 +3,32 @@
     "helloAsso": {
       "id": "someid",
       "secret": "somesecret"
-    }
+    },
     "ovh": {
-      "endpoint": "someOvhEndpoint"
+      "endpoint": "someOvhEndpoint",
       "ak": "someApplicationKey",
-      "as": "someApplicationSecret"
+      "as": "someApplicationSecret",
       "ck": "someClientKey"
     }
   },
   "conf": {
     "helloAsso": {
       "api_url": "https://api.helloasso.com",
-      "organization_name": "someOrganizationName"
+      "organization_name": "someOrganizationName",
       "formName": "someFormName",
-      "subscriptionAfter": "2022-01-24"
+      "subscriptionAfter": "2024-01-24T00:00:00",
+      "first_sub": "Is this your first sub question in helloasso form",
+      "default": {
+        "default": "answer",
+        "to": "helloasso_optionnal_form"
+      }
     },
     "cotisation_label": "label2define",
-    "webhook_url": "someZapirWebHook"
+    "webhook_url": "someZapirWebHook",
     "ovh": {
       "mailingList": {
         "name": "someMailingListeName",
-        "domain": "someDomain2Update"
+        "domain": "someDomain2Update.org"
       }
     }
   }
