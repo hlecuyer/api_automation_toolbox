@@ -11,11 +11,11 @@ name: Release
     tags:
       - "*"
 env:
-  APP_NAME: helloasso_dump
+  APP_NAME: hello_asso
 
 defaults:
   run:
-    working-directory: ${{ env.APP_NAME }}
+    working-directory: hello_asso
 
 jobs:
   release:
