@@ -1,5 +1,0 @@
----
-- hosts: all
-
-  roles:
-  - chadek.deploy_archive

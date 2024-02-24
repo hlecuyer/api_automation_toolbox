@@ -10,7 +10,7 @@ name: CI
 
 defaults:
   run:
-    working-directory: "chadek.api_automation_toolbox"
+    working-directory: "hello-asso-sync"
 
 jobs:
   lint:
@@ -20,7 +20,7 @@ jobs:
       - name: Check out the codebase.
         uses: actions/checkout@v4
         with:
-          path: "chadek.api_automation_toolbox"
+          path: "hello-asso-sync"
 
       - name: Set up Python 3.
         uses: actions/setup-python@v5
