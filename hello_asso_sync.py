@@ -143,7 +143,7 @@ class SyncHelloAsso:
                     tmp = {
                         "email": item["payer"]["email"],
                         "firstName": item["user"]["firstName"],
-                        "lastName": item["user"]["lastName"],
+                        "lastName": item["user"]["lastName"].upper(),
                         "date": item["order"]["date"],
                         "cotisation": self.conf["cotisation_label"],
                     }
