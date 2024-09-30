@@ -146,6 +146,7 @@ class SyncHelloAsso:
                         "lastName": item["user"]["lastName"].upper(),
                         "date": item["order"]["date"],
                         "cotisation": self.conf["cotisation_label"],
+                        "groupe": self.conf["groupe"],
                     }
                     # print(tmp)
 
