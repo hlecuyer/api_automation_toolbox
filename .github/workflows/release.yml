@@ -46,7 +46,7 @@ jobs:
           overwrite: true
 
       - name: Install Ansible and import deploy_archive role
-        run: pip3 install ansible-core; ansible-galaxy role install chadek.deploy_archive
+        run: ansible-galaxy role install chadek.deploy_archive
 
       - name: Generate ansibl-playbook
         run: |
