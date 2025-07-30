@@ -1,0 +1,27 @@
+{
+  "credentials": {
+    "airtable": {
+      "token": ""
+    },
+    "ovh": {
+      "endpoint": "ovh-eu",
+      "ak": "x",
+      "as": "x",
+      "ck": "x"
+    }
+  },
+  "conf": {
+    "auto_sync_mailing_list": {
+      "base_id": "x",
+      "table_id": "x",
+      "label_field": "Label",
+      "mail_field": "Liste mails",
+      "select_field": [
+        {
+          "name": "Label"
+        }
+      ],
+      "ovh_domain": "domain.org"
+    }
+  }
+}

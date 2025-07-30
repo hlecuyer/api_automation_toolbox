@@ -1,0 +1,67 @@
+{
+  "credentials": {
+    "airtable": {
+      "token": ""
+    },
+    "ovh": {
+      "endpoint": "ovh-eu",
+      "ak": "x",
+      "as": "x",
+      "ck": "x"
+    }
+  },
+  "conf": {
+      "compare": [
+        {
+          "type": "airtable",
+          "base_id": "x",
+          "table_id": "x",
+          "select_field": [
+            {
+              "name": "E-mail"
+            },
+            {
+              "name": "Mail optionnel",
+              "split":","
+            }
+          ],
+          "filter": {
+            "operation": "=",
+            "field": "Cotisation",
+            "value": ["Payé 2024","Payé 2025"]
+          }
+        },
+        {
+          "type": "airtable",
+          "base_id": "x",
+          "table_id": "x",
+          "select_field": [
+            {
+              "name": "Email"
+            }
+          ]
+        },
+        {
+          "type": "airtable",
+          "base_id": "x",
+          "table_id": "x",
+          "select_field": [
+            {
+              "name": "Email"
+            }
+          ]
+        },
+        {
+          "type": "airtable",
+          "base_id": "x",
+          "table_id": "x",
+          "select_field": [
+            {
+              "name": "Email"
+            }
+          ]
+        }
+      ],
+    "cotisation_label": ["Payé 2024","Payé 2025"]
+  }
+}

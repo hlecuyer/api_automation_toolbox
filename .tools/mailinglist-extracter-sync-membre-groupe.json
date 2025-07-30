@@ -1,0 +1,38 @@
+{
+  "credentials": {
+    "airtable": {
+      "token": ""
+    },
+    "ovh": {
+      "endpoint": "ovh-eu",
+      "ak": "x",
+      "as": "x",
+      "ck": "x"
+    }
+  },
+  "conf": {
+    "sync_mailing_list": [
+      {
+        "type": "airtable",
+        "base_id": "x",
+        "table_id": "x",
+        "select_field": [
+          {
+            "name": "E-mail"
+          }
+        ],
+        "filter": {
+          "field": "Groupe(s)",
+          "value": ["Groupe 1","Groupe 2", "Groupe 3"]
+        }
+      },
+      {
+        "type": "ovh",
+        "mailingList": {
+          "name": "list-name",
+          "domain": "domain.org"
+        }
+      }
+    ]
+  }
+}
