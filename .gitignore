@@ -1,0 +1,15 @@
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.local.json
+*-test.local.json
+dry_run_data.json
+.env
+.env.local
+hello-asso-automation-conf.json
+hello-asso-automation-conf-test.json
+.coverage
+.coverage.*
+htmlcov/
+*.cover

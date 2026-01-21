@@ -1,0 +1,31 @@
+{
+    "conf": {
+        "cotisation_label": "Payé 2025",
+        "groupe": "Adhérent·es la Coop des Communs",
+        "helloAsso": {
+            "api_url": "https://api.helloasso.com",
+            "default": {
+                "Date de naissance": "",
+                "Fonction au sein de votre structure": "",
+                "Genre": "Non-précisé",
+                "Intérêts (mot-clés)": "",
+                "Localisation (code postal)": "",
+                "Si oui, pouvez-vous nous indiquer deux personnes connues au sein de l'association ?": "",
+                "Souhaitez-vous partager les informations précédentes avec les autres adhérent·es de la Coop des Communs ? Pour information, les champs suivants seront uniquement accessibles par l'équipe de gestion de l'association et les prestataires missionnés.": "Non",
+                "Structure": ""
+            },
+            "first_sub_field": "Est-ce votre première adhésion à la coop des communs ?",
+            "form_name": "Adhésion année 2025",
+            "name_field": "Nom",
+            "organization_name": "la-coop-des-communs",
+            "subscription_after": "2025-01-01T11:12:12"
+        },
+        "ovh": {
+            "mailing_list": {
+                "domain": "coopdescommuns.org",
+                "name": "membres"
+            }
+        },
+        "webhook_url": "https://hooks.zapier.com/hooks/******"
+    }
+}

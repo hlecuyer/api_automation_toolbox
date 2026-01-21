@@ -7,6 +7,7 @@ import syslog
 import argparse
 import requests
 import ovh
+from src.config_loader import load_config
 
 # Class to sync data from hello-asso to airtable using zapier automation with webhooks
 
@@ -17,13 +18,20 @@ class SyncHelloAsso:
     # init class loading config file value
 
     def __init__(self, config_path):
+        """
+        Initialize SyncHelloAsso with configuration.
+        
+        Args:
+            config_path: Path to JSON config file containing non-sensitive configuration.
+                        Credentials will be loaded from environment variables (.env file).
+        """
         self.conf_path = config_path
         try:
-            with open(config_path, "r", encoding="utf-8") as jsonfile:
-                config = json.load(jsonfile)
-                # store the wall config in this var to update the config file
-                self.conf_global = config
-                self.conf = config["conf"]
+            # Load config from JSON file with credentials from env vars
+            config = load_config(config_path)
+            # store the wall config in this var to update the config file
+            self.conf_global = config
+            self.conf = config["conf"]
         except Exception as e:
             syslog.syslog(syslog.LOG_ERR, f"Failed to load configuration: {e}")
             raise e
@@ -35,7 +43,7 @@ class SyncHelloAsso:
             "Authorization": "Bearer " + token,
         }
         self.ovh_client = ovh.Client(
-            endpoint="ovh-eu",
+            endpoint=self.conf_global["credentials"]["ovh"].get("endpoint", "ovh-eu"),
             application_key=self.conf_global["credentials"]["ovh"]["ak"],
             application_secret=self.conf_global["credentials"]["ovh"]["as"],
             consumer_key=self.conf_global["credentials"]["ovh"]["ck"],
