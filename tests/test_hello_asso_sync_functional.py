@@ -25,7 +25,7 @@ def functional_config():
 class TestFunctionalSync:
     """Functional tests with real HelloAsso API connection only"""
 
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_real_connection_to_helloasso(self, mock_ovh_client, functional_config, tmp_path):
         """Test real connection to HelloAsso API (no webhook/OVH calls)"""
         # Create temporary config file for test
@@ -37,13 +37,14 @@ class TestFunctionalSync:
         sync = SyncHelloAsso(str(test_config_path))
         
         # Verify authentication worked
-        assert sync.headers is not None
-        assert 'Authorization' in sync.headers
-        assert sync.headers['Authorization'].startswith('Bearer ')
+        assert sync.hello_asso_client._token is not None
+        assert sync.hello_asso_client._headers is not None
+        assert 'Authorization' in sync.hello_asso_client._headers
+        assert sync.hello_asso_client._headers['Authorization'].startswith('Bearer ')
         
         # Get form details from real HelloAsso API
         form_name = sync.conf_global['conf']['helloAsso']['form_name']
-        form_details = sync.get_form_details(form_name)
+        form_details = sync.hello_asso_client.get_form_details(form_name)
         
         assert form_details is not None
         assert 'formSlug' in form_details
@@ -51,7 +52,7 @@ class TestFunctionalSync:
         print(f"✓ Form type: {form_details.get('formType')}")
         print(f"✓ Form slug: {form_details.get('formSlug')}")
 
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_get_form_data_from_helloasso(self, mock_ovh_client, functional_config, tmp_path):
         """Test retrieving form data from HelloAsso (no webhook/OVH calls)"""
         test_config_path = tmp_path / "test_config.json"
@@ -60,12 +61,12 @@ class TestFunctionalSync:
         
         sync = SyncHelloAsso(str(test_config_path))
         form_name = sync.conf_global['conf']['helloAsso']['form_name']
-        form_details = sync.get_form_details(form_name)
+        form_details = sync.hello_asso_client.get_form_details(form_name)
         
         assert form_details, "Could not get form details"
         
         # Get recent data from HelloAsso
-        form_data = sync.get_form_data(
+        form_data = sync.hello_asso_client.get_form_items(
             form_details['formType'],
             form_details['formSlug']
         )
@@ -79,7 +80,7 @@ class TestFunctionalSync:
             print(f"✓ Processed records: {processed_count}")
             print(f"✓ Sample email: {form_data[0].get('payer', {}).get('email')}")
 
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_sync_workflow_without_sending(
         self,
         mock_ovh_client,
@@ -97,34 +98,21 @@ class TestFunctionalSync:
         
         # Initialize with REAL HelloAsso authentication
         sync = SyncHelloAsso(str(test_config_path))
-        form_name = sync.conf_global['conf']['helloAsso']['form_name']
-        form_details = sync.get_form_details(form_name)
         
-        # Get data from HelloAsso
-        form_data = sync.get_form_data(
-            form_details['formType'],
-            form_details['formSlug']
-        )
-        
-        subscription_after = sync.conf_global['conf']['helloAsso'].get(
-            'subscription_after',
-            '1970-01-01T00:00:00'
-        )
-        
-        # Mock webhook calls ONLY during sync
-        with patch('src.hello_asso_sync.requests.post') as mock_webhook:
+        # Now mock webhook AFTER initialization
+        with patch('src.clients.webhook_client.requests.post') as mock_webhook:
             mock_webhook_response = Mock()
             mock_webhook_response.status_code = 200
             mock_webhook.return_value = mock_webhook_response
             
-            # Call sync with mocked webhooks
-            sync.sync_user_to_airtable(form_data, subscription_after)
+            # Simply run the workflow - webhooks and OVH are already mocked
+            sync.run()
             
             print(f"✓ Workflow executed successfully (webhooks mocked)")
             print(f"✓ Would have sent {mock_webhook.call_count} webhook calls")
             print(f"✓ OVH mailing list calls: {mock_ovh_instance.post.call_count}")
 
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_inspect_webhook_and_ovh_data(
         self,
         mock_ovh_client,
@@ -142,32 +130,20 @@ class TestFunctionalSync:
         
         # Initialize with REAL HelloAsso authentication
         sync = SyncHelloAsso(str(test_config_path))
-        form_name = sync.conf_global['conf']['helloAsso']['form_name']
-        form_details = sync.get_form_details(form_name)
-        
-        # Get data from HelloAsso
-        form_data = sync.get_form_data(
-            form_details['formType'],
-            form_details['formSlug']
-        )
-        
-        subscription_after = sync.conf_global['conf']['helloAsso'].get(
-            'subscription_after',
-            '1970-01-01T00:00:00'
-        )
         
         print("\n" + "="*100)
         print("📊 INSPECTION DES DONNÉES ENVOYÉES AUX SERVICES EXTERNES")
         print("="*100)
         
-        # Mock webhook to capture what would be sent
-        with patch('src.hello_asso_sync.requests.post') as mock_webhook:
+        # Mock webhook AFTER initialization
+        with patch('src.clients.webhook_client.requests.post') as mock_webhook:
             mock_webhook_response = Mock()
             mock_webhook_response.status_code = 200
             mock_webhook.return_value = mock_webhook_response
             
-            # Call sync with mocked webhooks
-            sync.sync_user_to_airtable(form_data, subscription_after)
+            # Run the sync - webhooks and OVH are mocked
+            # Run the sync - webhooks and OVH are mocked
+            sync.run()
             
             # Display webhook calls
             print(f"\n🌐 WEBHOOKS ZAPIER/AIRTABLE: {mock_webhook.call_count} appel(s)")
@@ -232,7 +208,7 @@ class TestFunctionalSync:
             print(f"📊 RÉSUMÉ: {mock_webhook.call_count} webhook(s) + {mock_ovh_instance.post.call_count} OVH call(s)")
             print("="*100 + "\n")
 
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_dry_run_data_inspection(self, mock_ovh_client, functional_config, tmp_path):
         """Dry run: Get data from HelloAsso for inspection without sending anywhere"""
         test_config_path = tmp_path / "test_config.json"
@@ -241,9 +217,9 @@ class TestFunctionalSync:
         
         sync = SyncHelloAsso(str(test_config_path))
         form_name = sync.conf_global['conf']['helloAsso']['form_name']
-        form_details = sync.get_form_details(form_name)
+        form_details = sync.hello_asso_client.get_form_details(form_name)
         
-        form_data = sync.get_form_data(
+        form_data = sync.hello_asso_client.get_form_items(
             form_details['formType'],
             form_details['formSlug']
         )
@@ -271,7 +247,7 @@ class TestFunctionalSync:
                 print(f"  - Name: {sample.get('user', {}).get('firstName')} {sample.get('user', {}).get('lastName')}")
                 print(f"  - Date: {sample.get('order', {}).get('date')}")
 
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_authentication_token_valid(self, mock_ovh_client, functional_config, tmp_path):
         """Verify HelloAsso authentication token is valid and can make API calls"""
         test_config_path = tmp_path / "test_config.json"
@@ -288,7 +264,7 @@ class TestFunctionalSync:
         response = requests.get(
             url,
             params={"pageSize": "1"},
-            headers=sync.headers,
+            headers=sync.hello_asso_client._headers,
             timeout=10
         )
         
@@ -301,18 +277,12 @@ class TestFunctionalSync:
 class TestFullWorkflow:
     """Full workflow tests - marked as slow"""
 
-    @patch('src.hello_asso_sync.ovh.Client')
     def test_complete_sync_workflow_mocked(
         self,
-        mock_ovh_client,
         functional_config,
         tmp_path
     ):
         """Test complete sync workflow with mocked external services"""
-        # Mock OVH client
-        mock_ovh_instance = Mock()
-        mock_ovh_client.return_value = mock_ovh_instance
-        
         # Setup test config
         test_config_path = tmp_path / "test_config.json"
         with open(test_config_path, 'w', encoding='utf-8') as f:
@@ -321,8 +291,15 @@ class TestFullWorkflow:
         # Initialize with REAL HelloAsso
         sync = SyncHelloAsso(str(test_config_path))
         
-        # Mock webhooks during run()
-        with patch('src.hello_asso_sync.requests.post') as mock_webhook:
+        # Mock webhook and OVH AFTER initialization to allow HelloAsso auth
+        with patch('src.clients.webhook_client.requests.post') as mock_webhook, \
+             patch('src.clients.ovh_client.ovh.Client') as mock_ovh_client:
+            
+            # Mock OVH client
+            mock_ovh_instance = Mock()
+            mock_ovh_client.return_value = mock_ovh_instance
+            
+            # Mock webhook
             mock_webhook_response = Mock()
             mock_webhook_response.status_code = 200
             mock_webhook.return_value = mock_webhook_response

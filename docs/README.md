@@ -1,12 +1,26 @@
 # HelloAsso Automation Tool
 
-The HelloAsso Automation Tool is a Python script that extracts data from the HelloAsso API and feeds it to a Zapier webhook. It also updates an OVH mailing list using the OVH API.
+The HelloAsso Automation Tool is a Python application that extracts data from the HelloAsso API and feeds it to a Zapier webhook. It also updates an OVH mailing list using the OVH API.
 
 ## Description
 
-The HelloAsso Automation Tool query HelloAsso api to retrieve subscribers which have completed payment on the form specify in configuration file. It then send subscribers informations to a zapier webhook in order to fill an airtable database using zapier automation. 
+The HelloAsso Automation Tool queries the HelloAsso API to retrieve subscribers who have completed payment on the form specified in the configuration file. It then sends subscriber information to a Zapier webhook to fill an Airtable database using Zapier automation.
 
-If passing data to zapier webhook success, this script then update an ovh mailing list using ovh api.   
+If passing data to the Zapier webhook succeeds, the script then updates an OVH mailing list using the OVH API.
+
+## Architecture
+
+The project follows a clean architecture pattern with separation of concerns:
+
+- **Models** (`src/models/`): Typed data classes
+  - `UserSubscription`: Represents a user subscription with all fields from HelloAsso
+
+- **Clients** (`src/clients/`): Service-specific clients
+  - `HelloAssoClient`: Handles HelloAsso API authentication and data retrieval
+  - `OVHMailingClient`: Manages OVH mailing list subscriptions
+  - `WebhookClient`: Sends data to Zapier/Airtable webhooks
+
+- **Orchestrator** (`src/hello_asso_sync.py`): Coordinates all clients to execute the full workflow   
 
 ## Requirements
 
@@ -58,10 +72,21 @@ The following parameters are stored in the configuration file:
 
 ## Running
 
-To run the HelloAsso Automation Tool, simply execute the `helloasso_dump.py` file in the repository directory:
+To run the HelloAsso Automation Tool, execute the module from the repository root:
 
-```
-python helloasso_dump.py --conf path/to//hello-asso-automation-conf.json
+```bash
+python -m src.hello_asso_sync path/to/hello-asso-automation-conf.json
 ```
 
-This will extract data from the HelloAsso API, send it to your Zapier webhook, and update your OVH mailing list using the OVH API.
+Or using the virtual environment:
+
+```bash
+.venv/bin/python -m src.hello_asso_sync hello-asso-automation-conf.json
+```
+
+This will:
+1. Authenticate with HelloAsso API
+2. Retrieve new subscriptions from the specified form
+3. Send each subscription to the Zapier webhook
+4. Add subscribers to the OVH mailing list
+5. Update the configuration file with the latest sync date

@@ -1,40 +1,46 @@
-# Tests for hello_asso_sync.py
+# Tests for HelloAsso Sync
 
-This directory contains comprehensive tests for the HelloAsso sync module.
+This directory contains comprehensive tests for the HelloAsso sync application.
 
-## Test Coverage
+## Test Files
 
-The test suite includes 22 tests covering:
+- **`test_refactored_code.py`**: Tests unitaires pour la nouvelle architecture (9 tests)
+- **`test_hello_asso_sync_functional.py`**: Tests fonctionnels avec vraie API HelloAsso (6 tests)
+- **`test_hello_asso_sync.py`**: Tests unitaires legacy (22 tests, maintenu pour référence)
+
+## Test Coverage - Nouvelle Architecture
+
+La suite de tests `test_refactored_code.py` couvre:
+
+- **UserSubscription Model** (3 tests)
+  - Data parsing from HelloAsso API response
+  - Field transformation (uppercase, year conversion)
+  - Webhook payload generation
+
+- **HelloAssoClient** (1 test)
+  - Subscription parsing with real data structure
+
+- **OVHMailingClient** (2 tests)
+  - Adding subscribers to mailing lists
+  - Handling duplicate subscriber conflicts (ResourceConflictError)
+
+- **WebhookClient** (1 test)
+  - Sending UserSubscription data to webhooks
+
+- **SyncHelloAsso Integration** (2 tests)
+  - Full workflow with all three clients
+  - Client initialization and orchestration
+
+## Test Coverage - Legacy Architecture
+
+La suite de tests `test_hello_asso_sync.py` couvre :
 
 - **Configuration & Authentication** (6 tests)
-  - Configuration file loading
-  - HelloAsso API authentication
-  - OVH client initialization
-  - Error handling for invalid configurations
-
 - **Form Management** (4 tests)
-  - Form details retrieval
-  - Form data fetching with pagination
-  - Edge cases (non-existent forms, multiple pages)
-
 - **OVH Mailing List** (2 tests)
-  - Adding subscribers to mailing lists
-  - Handling duplicate subscriber conflicts
-
 - **User Synchronization** (6 tests)
-  - Date-based filtering
-  - Record processing and transformation
-  - Custom field handling (first_sub, name fields)
-  - State filtering (Processed vs Pending)
-  - Webhook failure handling
-
 - **Configuration Updates** (2 tests)
-  - Date field updates
-  - File write error handling
-
 - **Integration** (2 tests)
-  - Full workflow execution
-  - Missing configuration handling
 
 ## Running the Tests
 
@@ -55,29 +61,42 @@ pip install pytest pytest-mock pytest-cov
 ### Run All Tests
 
 ```bash
-pytest test_hello_asso_sync.py -v
+# Tous les tests
+pytest tests/ -v
+
+# Tests unitaires nouvelle architecture uniquement
+pytest tests/test_refactored_code.py -v
+
+# Tests fonctionnels (API réelle HelloAsso)
+pytest tests/test_hello_asso_sync_functional.py -v -s
+
+# Tests legacy
+pytest tests/test_hello_asso_sync.py -v
 ```
 
 ### Run with Coverage Report
 
 ```bash
-pytest test_hello_asso_sync.py --cov=hello_asso_sync --cov-report=term-missing
+pytest tests/test_refactored_code.py --cov=src --cov-report=term-missing
 ```
 
 ### Run Specific Test Classes
 
 ```bash
-# Run only initialization tests
-pytest test_hello_asso_sync.py::TestSyncHelloAssoInit -v
+# Tests du modèle UserSubscription
+pytest tests/test_refactored_code.py::TestUserSubscription -v
 
-# Run only sync tests
-pytest test_hello_asso_sync.py::TestSyncUserToAirtable -v
+# Tests du client HelloAsso
+pytest tests/test_refactored_code.py::TestHelloAssoClient -v
+
+# Tests d'intégration
+pytest tests/test_refactored_code.py::TestSyncHelloAssoIntegration -v
 ```
 
 ### Run Specific Tests
 
 ```bash
-pytest test_hello_asso_sync.py::TestSyncUserToAirtable::test_sync_user_to_airtable_filters_by_date -v
+pytest tests/test_refactored_code.py::TestUserSubscription::test_from_hello_asso_item -v
 ```
 
 ## Test Structure
@@ -97,21 +116,23 @@ The tests use:
 
 ## Known Issues & Notes
 
-1. **Pagination Bug**: The current implementation has a bug in `get_form_data` where it uses `current_page += current_page` instead of `current_page += 1`. The test suite documents this behavior.
+1. **Pagination Bug Fixed**: Le bug de pagination dans `get_form_data` (utilisant `current_page += current_page`) a été corrigé dans `HelloAssoClient.get_form_items()` qui utilise maintenant `current_page += 1`.
 
-2. **Mocked External Dependencies**: All tests mock:
+2. **Mocked External Dependencies**: Les tests unitaires mockent :
    - HelloAsso API calls
    - OVH API calls
    - Webhook/Zapier calls
    - File system operations
 
-This ensures tests run quickly and don't depend on external services.
+3. **Tests Fonctionnels**: Les tests dans `test_hello_asso_sync_functional.py` utilisent la **vraie API HelloAsso** mais mockent OVH et les webhooks pour un mode dry-run sécurisé.
+
+Ceci garantit que les tests unitaires sont rapides et ne dépendent pas de services externes, tout en validant l'intégration réelle avec HelloAsso.
 
 ## Code Coverage
 
-Current coverage: **96%**
-
-Uncovered lines (225-231): The `if __name__ == "__main__"` block for command-line execution.
+- **Nouvelle architecture**: 9/9 tests passent
+- **Tests fonctionnels**: 6/6 tests passent (avec vraie API HelloAsso)
+- **Tests legacy**: 22 tests (maintenus pour référence)
 
 ## Contributing
 

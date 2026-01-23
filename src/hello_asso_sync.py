@@ -2,20 +2,17 @@
 
 from datetime import datetime
 import json
-import sys
 import syslog
 import argparse
-import requests
-import ovh
 from src.config_loader import load_config
+from src.clients import HelloAssoClient, OVHMailingClient, WebhookClient
+from src.models import UserSubscription
 
 # Class to sync data from hello-asso to airtable using zapier automation with webhooks
 
 
 class SyncHelloAsso:
-    """Class to handle helloasso data"""
-
-    # init class loading config file value
+    """Class to handle helloasso data synchronization using dedicated clients."""
 
     def __init__(self, config_path):
         """
@@ -29,178 +26,79 @@ class SyncHelloAsso:
         try:
             # Load config from JSON file with credentials from env vars
             config = load_config(config_path)
-            # store the wall config in this var to update the config file
+            # store the full config to update the config file
             self.conf_global = config
             self.conf = config["conf"]
         except Exception as e:
             syslog.syslog(syslog.LOG_ERR, f"Failed to load configuration: {e}")
             raise e
-        # retreive api hello-asso api token to perform authenticate queries
-        token = self.__authenticate()
-        # set hearders with api token
-        self.headers = {
-            "Accept": "application/json",
-            "Authorization": "Bearer " + token,
-        }
-        self.ovh_client = ovh.Client(
-            endpoint=self.conf_global["credentials"]["ovh"].get("endpoint", "ovh-eu"),
+        
+        # Initialize clients
+        self._init_clients()
+    
+    def _init_clients(self):
+        """Initialize all service clients."""
+        # Initialize HelloAsso client
+        self.hello_asso_client = HelloAssoClient(
+            api_url=self.conf["helloAsso"]["api_url"],
+            organization_name=self.conf["helloAsso"]["organization_name"],
+            client_id=self.conf_global["credentials"]["helloAsso"]["id"],
+            client_secret=self.conf_global["credentials"]["helloAsso"]["secret"],
+        )
+        
+        # Initialize OVH mailing client
+        self.ovh_client = OVHMailingClient(
             application_key=self.conf_global["credentials"]["ovh"]["ak"],
             application_secret=self.conf_global["credentials"]["ovh"]["as"],
             consumer_key=self.conf_global["credentials"]["ovh"]["ck"],
+            domain=self.conf["ovh"]["mailing_list"]["domain"],
+            mailing_list_name=self.conf["ovh"]["mailing_list"]["name"],
+            endpoint=self.conf_global["credentials"]["ovh"].get("endpoint", "ovh-eu"),
+        )
+        
+        # Initialize webhook client
+        self.webhook_client = WebhookClient(
+            webhook_url=self.conf["webhook_url"],
         )
 
-    # Call hello-asso authentication api end-point to retrieve api token
-    def __authenticate(self):
-        """Function authenticating helloasso client."""
-
-        headers = {"content-type": "application/x-www-form-urlencoded"}
-
-        payload = {
-            "grant_type": "client_credentials",
-            "client_id": self.conf_global["credentials"]["helloAsso"]["id"],
-            "client_secret": self.conf_global["credentials"]["helloAsso"]["secret"],
-        }
-
-        url = "{}/oauth2/token".format(self.conf["helloAsso"]["api_url"])
-        r = requests.post(url, data=payload, headers=headers, timeout=10)
-
-        try:
-            access_token = r.json()["access_token"]
-            return access_token
-        except Exception as e:
-            syslog.syslog(
-                syslog.LOG_ERR,
-                "Something went wrong while authenticating to helloasso: {}".format(e),
-            )
-            raise e
-
-    def get_form_details(self, name):
-        """Find formular detail usig formular name (needed to get
-        formular data using form_type and form_slug avriables)"""
-
-        payload = {"pageSize": "100"}
-
-        url = "{}/v5/organizations/{}/forms".format(
-            self.conf["helloAsso"]["api_url"],
-            self.conf["helloAsso"]["organization_name"],
-        )
-        r = requests.get(url, params=payload, headers=self.headers, timeout=10)
-
-        data = r.json()["data"]
-
-        for item in data:
-            if item["title"] == name:
-                return item
-        return {}
-
-    def get_form_data(self, form_type, form_slug):
-        """Function retrieve formular data using form_type and form_slug"""
-
-        data = []
-        total_pages = 2
-        current_page = 1
-        while total_pages > current_page:
-            payload = {
-                "pageIndex": current_page,
-                "pageSize": "100",
-                "withDetails": True,
-            }
-            url = "{}/v5/organizations/{}/forms/{}/{}/items".format(
-                self.conf["helloAsso"]["api_url"],
-                self.conf["helloAsso"]["organization_name"],
-                form_type,
-                form_slug,
-            )
-            r = requests.get(url, params=payload, headers=self.headers, timeout=10)
-            resp_json = r.json()
-            data.extend(resp_json["data"])
-            total_pages = resp_json["pagination"]["totalPages"]
-            current_page += current_page
-        return data
-
-    def update_ovh_mailing_list(self, mail):
-        """Function to add a subscriber to ovh mailing list"""
-        try:
-            self.ovh_client.post(
-                "/email/domain/{}/mailingList/{}/subscriber".format(
-                    self.conf["ovh"]["mailing_list"]["domain"],
-                    self.conf["ovh"]["mailing_list"]["name"],
-                ),
-                email=mail,
-            )
-            # print(result)
-            # print(json.dumps(result, indent=4))
-        except ovh.exceptions.ResourceConflictError as e:
-            syslog.syslog(
-                syslog.LOG_INFO,
-                "The subscriber {} already exists in this mailing list. Details: {}".format(
-                    mail, e
-                ),
-            )
-
-    def sync_user_to_airtable(self, data, date="2000-01-01T00:00:00"):
-        """Function that Extract email, first name and last name from hello asso data and send it
-        to airtable if subscription was made after "subscription_after" variable value
+    
+    def sync_subscriptions(
+        self,
+        subscriptions: list[UserSubscription],
+        filter_date: datetime,
+    ) -> None:
         """
-        users = []
-        headers = {"content-type": "application/json"}
+        Sync user subscriptions to webhook and mailing list.
+        
+        Args:
+            subscriptions: List of UserSubscription objects
+            filter_date: Only process subscriptions after this date
+        """
+        processed_emails = set()
+        
+        for subscription in subscriptions:
+            # Skip duplicates
+            if subscription.email in processed_emails:
+                continue
+            
+            # Filter by date
+            if subscription.subscription_date >= filter_date:
+                # Send to webhook
+                success = self.webhook_client.send_subscription(subscription)
+                
+                if not success:
+                    syslog.syslog(
+                        syslog.LOG_ERR,
+                        f"Failed to send subscription for {subscription.email}",
+                    )
+                    continue
+                
+                # Add to OVH mailing list
+                self.ovh_client.add_subscriber(subscription.email)
+            
+            processed_emails.add(subscription.email)
 
-        for item in data:
-            if item["state"] == "Processed":
-                if item["payer"]["email"] not in users:
-                    tmp = {
-                        "email": item["payer"]["email"],
-                        "firstName": item["user"]["firstName"],
-                        "lastName": item["user"]["lastName"].upper(),
-                        "date": item["order"]["date"],
-                        "cotisation": self.conf["cotisation_label"],
-                        "groupe": self.conf["groupe"],
-                    }
-                    # print(tmp)
 
-                    for fields in item["customFields"]:
-                        tmp[fields["name"]] = fields["answer"]
-
-                    for key, value in self.conf["helloAsso"]["default"].items():
-                        if key not in tmp:
-                            tmp[key] = value
-
-                    date_str = tmp["date"].split("+")[0].split(".")[0]
-                    date_subscription = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
-                    if self.conf["helloAsso"]["first_sub_field"] in tmp:
-                        if tmp[self.conf["helloAsso"]["first_sub_field"]] == "Oui":
-                            tmp[self.conf["helloAsso"]["first_sub_field"]] = (
-                                date_subscription.strftime("%Y")
-                            )
-                    if self.conf["helloAsso"]["name_field"] in tmp:
-                        tmp[self.conf["helloAsso"]["name_field"]] = tmp[
-                            self.conf["helloAsso"]["name_field"]
-                        ].upper()
-
-                    date_filter = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
-                    if date_subscription >= date_filter:
-                        print("new record")
-                        print(json.dumps(tmp))
-                        r = requests.post(
-                            self.conf["webhook_url"],
-                            data=json.dumps(tmp),
-                            headers=headers,
-                            timeout=10,
-                        )
-                        print(r)
-                        if r.status_code != 200:
-                            syslog.syslog(
-                                syslog.LOG_ERR,
-                                "Request to zapier failed with status code {}".format(
-                                    r.status
-                                ),
-                            )
-                            sys.exit(-1)
-                        self.update_ovh_mailing_list(item["payer"]["email"])
-                    users.append(tmp)
-
-    # update subscription_after field with today's date (to avoid syncing several
-    # time the same user)
     def update_date_conf(self):
         """Update subscription_after field with today's date
         (to avoid syncing several time the same user)"""
@@ -218,15 +116,47 @@ class SyncHelloAsso:
             raise e
 
     def run(self):
-        """Class "entry point" """
-        form_detail = self.get_form_details(self.conf["helloAsso"]["form_name"])
-        form_data = self.get_form_data(form_detail["formType"], form_detail["formSlug"])
-        try:
-            date = self.conf["helloAsso"]["subscription_after"]
-            self.sync_user_to_airtable(form_data, date)
-            self.update_date_conf()
-        except KeyError:
-            self.sync_user_to_airtable(form_data)
+        """Main entry point for synchronization."""
+        # Get form details
+        form_detail = self.hello_asso_client.get_form_details(
+            self.conf["helloAsso"]["form_name"]
+        )
+        
+        if not form_detail:
+            syslog.syslog(
+                syslog.LOG_ERR,
+                f"Form '{self.conf['helloAsso']['form_name']}' not found",
+            )
+            return
+        
+        # Get form items
+        form_items = self.hello_asso_client.get_form_items(
+            form_detail["formType"],
+            form_detail["formSlug"],
+        )
+        
+        # Parse to subscriptions
+        subscriptions = self.hello_asso_client.parse_items_to_subscriptions(
+            items=form_items,
+            cotisation=self.conf["cotisation_label"],
+            groupe=self.conf["groupe"],
+            default_fields=self.conf["helloAsso"].get("default"),
+            first_sub_field=self.conf["helloAsso"].get("first_sub_field"),
+            name_field=self.conf["helloAsso"].get("name_field"),
+        )
+        
+        # Get filter date
+        date_str = self.conf["helloAsso"].get(
+            "subscription_after",
+            "2000-01-01T00:00:00",
+        )
+        filter_date = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
+        
+        # Sync subscriptions
+        self.sync_subscriptions(subscriptions, filter_date)
+        
+        # Update config with current date
+        self.update_date_conf()
 
 
 if __name__ == "__main__":
@@ -234,8 +164,5 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--conf", help="path to a config file")
     args = parser.parse_args()
 
-    helloAsso = SyncHelloAsso(args.conf)
-
-    helloAsso.run()
-#   standalone call to functio for testing purpose
-#    helloAsso.UpdateDateConf()
+    hello_asso_sync = SyncHelloAsso(args.conf)
+    hello_asso_sync.run()

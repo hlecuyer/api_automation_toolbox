@@ -156,13 +156,14 @@ def sample_items_data():
 class TestSyncHelloAssoInit:
     """Tests for SyncHelloAsso initialization"""
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_init_loads_config_successfully(self, mock_ovh_client, mock_post, 
                                            config_file, mock_auth_response):
         """Test that initialization loads config file correctly"""
         mock_response = Mock()
         mock_response.json.return_value = mock_auth_response
+        mock_response.raise_for_status = Mock()
         mock_post.return_value = mock_response
 
         sync = SyncHelloAsso(config_file)
@@ -172,32 +173,35 @@ class TestSyncHelloAssoInit:
         assert sync.conf["cotisation_label"] == "test_label"
         mock_post.assert_called_once()
 
-    @patch('src.hello_asso_sync.requests.post')
+    @patch('src.clients.hello_asso_client.requests.post')
     def test_init_fails_with_invalid_config_path(self, mock_post):
         """Test that initialization fails with non-existent config file"""
         with pytest.raises(Exception):
             SyncHelloAsso("/nonexistent/path/config.json")
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_init_calls_authentication(self, mock_ovh_client, mock_post, 
                                        config_file, mock_auth_response):
         """Test that initialization calls authentication"""
         mock_response = Mock()
         mock_response.json.return_value = mock_auth_response
+        mock_response.raise_for_status = Mock()
         mock_post.return_value = mock_response
 
         sync = SyncHelloAsso(config_file)
 
-        assert "Bearer test_token_123" in sync.headers["Authorization"]
+        # Check that the HelloAsso client has the token
+        assert sync.hello_asso_client._token == "test_token_123"
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_init_creates_ovh_client(self, mock_ovh_client, mock_post,
                                      config_file, mock_auth_response, sample_config):
         """Test that OVH client is initialized correctly"""
         mock_response = Mock()
         mock_response.json.return_value = mock_auth_response
+        mock_response.raise_for_status = Mock()
         mock_post.return_value = mock_response
 
         sync = SyncHelloAsso(config_file)
@@ -213,26 +217,28 @@ class TestSyncHelloAssoInit:
 class TestAuthenticate:
     """Tests for authentication method"""
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_authenticate_returns_token(self, mock_ovh_client, mock_post, 
                                         config_file, mock_auth_response):
         """Test successful authentication returns access token"""
         mock_response = Mock()
         mock_response.json.return_value = mock_auth_response
+        mock_response.raise_for_status = Mock()
         mock_post.return_value = mock_response
 
         sync = SyncHelloAsso(config_file)
 
-        # Authentication is called in __init__, check the header
-        assert "Bearer test_token_123" in sync.headers["Authorization"]
+        # Authentication is called in __init__, check the client token
+        assert sync.hello_asso_client._token == "test_token_123"
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_authenticate_raises_on_missing_token(self, mock_ovh_client, mock_post, config_file):
         """Test authentication raises exception when token is missing"""
         mock_response = Mock()
         mock_response.json.return_value = {}  # No access_token
+        mock_response.raise_for_status = Mock()
         mock_post.return_value = mock_response
 
         with pytest.raises(Exception):
@@ -242,9 +248,9 @@ class TestAuthenticate:
 class TestGetFormDetails:
     """Tests for get_form_details method"""
 
-    @patch('src.hello_asso_sync.requests.get')
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.get')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_get_form_details_returns_matching_form(self, mock_ovh_client, mock_post, 
                                                      mock_get, config_file, 
                                                      mock_auth_response, sample_form_data):
@@ -252,23 +258,25 @@ class TestGetFormDetails:
         # Setup auth
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
+        mock_auth.raise_for_status = Mock()
         mock_post.return_value = mock_auth
 
         # Setup get_form_details
         mock_forms = Mock()
         mock_forms.json.return_value = sample_form_data
+        mock_forms.raise_for_status = Mock()
         mock_get.return_value = mock_forms
 
         sync = SyncHelloAsso(config_file)
-        result = sync.get_form_details("Test Form")
+        result = sync.hello_asso_client.get_form_details("Test Form")
 
         assert result["title"] == "Test Form"
         assert result["formType"] == "Membership"
         assert result["formSlug"] == "test-form-slug"
 
-    @patch('src.hello_asso_sync.requests.get')
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.get')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_get_form_details_returns_empty_when_not_found(self, mock_ovh_client, 
                                                            mock_post, mock_get, 
                                                            config_file, mock_auth_response, 
@@ -276,14 +284,16 @@ class TestGetFormDetails:
         """Test get_form_details returns empty dict when form not found"""
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
+        mock_auth.raise_for_status = Mock()
         mock_post.return_value = mock_auth
 
         mock_forms = Mock()
         mock_forms.json.return_value = sample_form_data
+        mock_forms.raise_for_status = Mock()
         mock_get.return_value = mock_forms
 
         sync = SyncHelloAsso(config_file)
-        result = sync.get_form_details("Non-existent Form")
+        result = sync.hello_asso_client.get_form_details("Non-existent Form")
 
         assert result == {}
 
@@ -291,82 +301,97 @@ class TestGetFormDetails:
 class TestGetFormData:
     """Tests for get_form_data method"""
 
-    @patch('src.hello_asso_sync.requests.get')
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.get')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_get_form_data_single_page(self, mock_ovh_client, mock_post, mock_get, 
                                        config_file, mock_auth_response, sample_items_data):
         """Test get_form_data with single page response"""
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
+        mock_auth.raise_for_status = Mock()
         mock_post.return_value = mock_auth
 
         mock_items = Mock()
         mock_items.json.return_value = sample_items_data
+        mock_items.raise_for_status = Mock()
         mock_get.return_value = mock_items
 
         sync = SyncHelloAsso(config_file)
-        result = sync.get_form_data("Membership", "test-form-slug")
+        result = sync.hello_asso_client.get_form_items("Membership", "test-form-slug")
 
         assert len(result) == 2
         assert result[0]["payer"]["email"] == "test@example.com"
 
-    @patch('src.hello_asso_sync.requests.get')
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.get')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_get_form_data_multiple_pages(self, mock_ovh_client, mock_post, mock_get, 
                                           config_file, mock_auth_response):
         """Test get_form_data handles pagination correctly"""
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
+        mock_auth.raise_for_status = Mock()
         mock_post.return_value = mock_auth
 
-        # Note: The actual implementation has a bug where it does current_page += current_page
-        # which doubles instead of incrementing. This test verifies current behavior.
         first_page = {
             "data": [{"id": 1}],
             "pagination": {"totalPages": 2, "currentPage": 1}
         }
+        
+        second_page = {
+            "data": [{"id": 2}],
+            "pagination": {"totalPages": 2, "currentPage": 2}
+        }
 
-        mock_get_response = Mock()
-        mock_get_response.json.return_value = first_page
-        mock_get.return_value = mock_get_response
+        mock_get_response1 = Mock()
+        mock_get_response1.json.return_value = first_page
+        mock_get_response1.raise_for_status = Mock()
+        
+        mock_get_response2 = Mock()
+        mock_get_response2.json.return_value = second_page
+        mock_get_response2.raise_for_status = Mock()
+        
+        mock_get.side_effect = [mock_get_response1, mock_get_response2]
 
         sync = SyncHelloAsso(config_file)
-        result = sync.get_form_data("Membership", "test-form-slug")
+        result = sync.hello_asso_client.get_form_items("Membership", "test-form-slug")
 
-        # Due to the bug (current_page += current_page), only one page is fetched
-        assert len(result) == 1
+        # Now pagination is fixed - should get both pages
+        assert len(result) == 2
         assert result[0]["id"] == 1
+        assert result[1]["id"] == 2
 
 
 class TestUpdateOvhMailingList:
-    """Tests for update_ovh_mailing_list method"""
+    """Tests for OVH mailing list method"""
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_update_ovh_mailing_list_success(self, mock_ovh_client, mock_post, 
                                              config_file, mock_auth_response):
         """Test successful mailing list update"""
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
+        mock_auth.raise_for_status = Mock()
         mock_post.return_value = mock_auth
 
         mock_client_instance = Mock()
         mock_ovh_client.return_value = mock_client_instance
 
         sync = SyncHelloAsso(config_file)
-        sync.update_ovh_mailing_list("test@example.com")
+        sync.ovh_client.add_subscriber("test@example.com")
 
         mock_client_instance.post.assert_called_once()
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.ovh_client.ovh.Client')
     def test_update_ovh_mailing_list_handles_conflict(self, mock_ovh_client, mock_post, 
                                                       config_file, mock_auth_response):
         """Test that ResourceConflictError is handled gracefully"""
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
+        mock_auth.raise_for_status = Mock()
         mock_post.return_value = mock_auth
 
         mock_client_instance = Mock()
@@ -375,34 +400,48 @@ class TestUpdateOvhMailingList:
 
         sync = SyncHelloAsso(config_file)
         # Should not raise exception
-        sync.update_ovh_mailing_list("test@example.com")
+        result = sync.ovh_client.add_subscriber("test@example.com")
+        assert result is True
 
 
 class TestSyncUserToAirtable:
-    """Tests for sync_user_to_airtable method"""
+    """Tests for sync_subscriptions method"""
 
-    @patch('src.hello_asso_sync.requests.post')
-    @patch('src.hello_asso_sync.ovh.Client')
-    def test_sync_user_to_airtable_filters_by_date(self, mock_ovh_client, mock_post, 
+    @patch('src.clients.hello_asso_client.requests.post')
+    @patch('src.clients.hello_asso_client.requests.get')
+    @patch('src.clients.ovh_client.ovh.Client')
+    @patch('src.clients.webhook_client.requests.post')
+    def test_sync_user_to_airtable_filters_by_date(self, mock_webhook_post, mock_ovh_client, 
+                                                    mock_get, mock_auth_post,
                                                     config_file, mock_auth_response, 
-                                                    sample_items_data):
+                                                    sample_items_data, sample_form_data):
         """Test that sync filters by date correctly"""
         mock_auth = Mock()
         mock_auth.json.return_value = mock_auth_response
-        mock_webhook = Mock()
-        mock_webhook.status_code = 200
-        mock_post.side_effect = [mock_auth, mock_webhook]
+        mock_auth.raise_for_status = Mock()
+        mock_auth_post.return_value = mock_auth
 
         mock_client_instance = Mock()
         mock_ovh_client.return_value = mock_client_instance
 
+        # Setup form details and items
+        mock_forms = Mock()
+        mock_forms.json.return_value = sample_form_data
+        mock_forms.raise_for_status = Mock()
+        
+        mock_items = Mock()
+        mock_items.json.return_value = sample_items_data
+        mock_items.raise_for_status = Mock()
+        
+        mock_get.side_effect = [mock_forms, mock_items]
+
         sync = SyncHelloAsso(config_file)
         
         # Use date after all items - should not send any
-        sync.sync_user_to_airtable(sample_items_data["data"], "2025-01-01T00:00:00")
+        sync.run()
 
-        # Only auth call should have been made
-        assert mock_post.call_count == 1
+        # No webhook calls should have been made
+        assert mock_webhook_post.call_count == 0
 
     @patch('src.hello_asso_sync.requests.post')
     @patch('src.hello_asso_sync.ovh.Client')
@@ -423,7 +462,7 @@ class TestSyncUserToAirtable:
         sync = SyncHelloAsso(config_file)
         
         # Use date before all items - should send all
-        sync.sync_user_to_airtable(sample_items_data["data"], "2024-01-01T00:00:00")
+        sync.sync_subscriptions(sample_items_data["data"], "2024-01-01T00:00:00")  # type: ignore
 
         # Auth + 2 webhook calls
         assert mock_post.call_count == 3
@@ -457,7 +496,7 @@ class TestSyncUserToAirtable:
                 "customFields": [{"name": "first_sub", "answer": "Oui"}]
             }]
             
-            sync.sync_user_to_airtable(data, "2024-01-01T00:00:00")
+            sync.sync_subscriptions(data, "2024-01-01T00:00:00")  # type: ignore
 
             # Verify webhook was called
             assert webhook_post.called
@@ -492,7 +531,7 @@ class TestSyncUserToAirtable:
                 "customFields": [{"name": "name", "answer": "john"}]
             }]
             
-            sync.sync_user_to_airtable(data, "2024-01-01T00:00:00")
+            sync.sync_subscriptions(data, "2024-01-01T00:00:00")  # type: ignore
 
             # Verify webhook was called
             assert webhook_post.called
@@ -523,7 +562,7 @@ class TestSyncUserToAirtable:
             "customFields": []
         }]
         
-        sync.sync_user_to_airtable(data, "2024-01-01T00:00:00")
+        sync.sync_subscriptions(data, "2024-01-01T00:00:00")  # type: ignore
 
         # Only auth call should have been made
         assert mock_post.call_count == 1
@@ -556,7 +595,7 @@ class TestSyncUserToAirtable:
             "customFields": []
         }]
         
-        sync.sync_user_to_airtable(data, "2024-01-01T00:00:00")
+        sync.sync_subscriptions(data, "2024-01-01T00:00:00")  # type: ignore
 
         mock_exit.assert_called_once_with(-1)
 

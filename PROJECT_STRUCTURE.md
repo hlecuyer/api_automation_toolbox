@@ -7,12 +7,23 @@ api_automation_toolbox/
 │
 ├── src/                              # Code source principal
 │   ├── __init__.py
-│   ├── hello_asso_sync.py           # Module principal de synchronisation
-│   └── config_loader.py              # Chargement de la configuration
+│   ├── hello_asso_sync.py           # Orchestrateur principal
+│   ├── config_loader.py              # Chargement de la configuration
+│   │
+│   ├── models/                       # Modèles de données typés
+│   │   ├── __init__.py
+│   │   └── user_subscription.py      # Dataclass UserSubscription
+│   │
+│   └── clients/                      # Clients pour services externes
+│       ├── __init__.py
+│       ├── hello_asso_client.py      # Client API HelloAsso
+│       ├── ovh_client.py             # Client API OVH
+│       └── webhook_client.py         # Client webhook Zapier/Airtable
 │
 ├── tests/                            # Tests
 │   ├── __init__.py
-│   ├── test_hello_asso_sync.py      # Tests unitaires (avec mocks)
+│   ├── test_hello_asso_sync.py      # Anciens tests unitaires
+│   ├── test_refactored_code.py      # Tests unitaires (nouvelle architecture)
 │   └── test_hello_asso_sync_functional.py  # Tests fonctionnels (API réelle)
 │
 ├── docs/                             # Documentation
@@ -39,7 +50,10 @@ api_automation_toolbox/
 ## 🎯 Philosophie d'Organisation
 
 ### `/src` - Code Source
-Tout le code de production, organisé de manière modulaire.
+Tout le code de production, organisé selon le pattern de séparation des responsabilités :
+- **`/models`** : Objets de données typés (dataclasses) pour représenter les données métier
+- **`/clients`** : Classes dédiées à chaque service externe (HelloAsso, OVH, Webhooks)
+- **Orchestrateur** : `hello_asso_sync.py` coordonne les différents clients
 
 ### `/tests` - Tests
 - **Tests unitaires** : Rapides, avec mocks, valident la logique
