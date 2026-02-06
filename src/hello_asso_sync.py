@@ -1,28 +1,39 @@
-"""Module pushing data from helloasso to a (zapier) webhook"""
+"""Module pushing data from HelloAsso to Airtable"""
 
 from datetime import datetime
 import json
 import syslog
 import argparse
 from src.config_loader import load_config
-from src.clients import HelloAssoClient, OVHMailingClient, WebhookClient
+from src.clients import (
+    HelloAssoClient,
+    OVHMailingClient,
+    AirtableClient,
+    OVHEmailClient,
+)
 from src.models import UserSubscription
 
-# Class to sync data from hello-asso to airtable using zapier automation with webhooks
+# Class to sync data from hello-asso to Airtable
 
 
 class SyncHelloAsso:
     """Class to handle helloasso data synchronization using dedicated clients."""
 
-    def __init__(self, config_path):
+    def __init__(self, config_path, dry_run=None):
         """
         Initialize SyncHelloAsso with configuration.
         
         Args:
             config_path: Path to JSON config file containing non-sensitive configuration.
                         Credentials will be loaded from environment variables (.env file).
+            dry_run: Dry run mode:
+                    - None: Normal mode (everything is real)
+                    - "only_airtable": Only Airtable is updated (no OVH, no emails, no date update)
+                    - "only_mail": Email dry run (Airtable + OVH updated, but no emails sent)
+                    - "full": Full dry run (nothing is modified, only simulation)
         """
         self.conf_path = config_path
+        self.dry_run = dry_run
         try:
             # Load config from JSON file with credentials from env vars
             config = load_config(config_path)
@@ -47,7 +58,7 @@ class SyncHelloAsso:
         )
         
         # Initialize OVH mailing client
-        self.ovh_client = OVHMailingClient(
+        self.ovh_mailing_client = OVHMailingClient(
             application_key=self.conf_global["credentials"]["ovh"]["ak"],
             application_secret=self.conf_global["credentials"]["ovh"]["as"],
             consumer_key=self.conf_global["credentials"]["ovh"]["ck"],
@@ -56,9 +67,26 @@ class SyncHelloAsso:
             endpoint=self.conf_global["credentials"]["ovh"].get("endpoint", "ovh-eu"),
         )
         
-        # Initialize webhook client
-        self.webhook_client = WebhookClient(
-            webhook_url=self.conf["webhook_url"],
+        # Initialize OVH email client (optional - only if email config exists)
+        if self.conf.get("ovh", {}).get("email"):
+            self.ovh_email_client = OVHEmailClient(
+                application_key=self.conf_global["credentials"]["ovh"]["ak"],
+                application_secret=self.conf_global["credentials"]["ovh"]["as"],
+                consumer_key=self.conf_global["credentials"]["ovh"]["ck"],
+                endpoint=self.conf_global["credentials"]["ovh"].get("endpoint", "ovh-eu"),
+                smtp_host=self.conf_global["credentials"].get("smtp", {}).get("host"),
+                smtp_port=self.conf_global["credentials"].get("smtp", {}).get("port"),
+                smtp_user=self.conf_global["credentials"].get("smtp", {}).get("user"),
+                smtp_password=self.conf_global["credentials"].get("smtp", {}).get("password"),
+            )
+        else:
+            self.ovh_email_client = None
+        
+        # Initialize Airtable client
+        self.airtable_client = AirtableClient(
+            api_key=self.conf_global["credentials"]["airtable"]["api_key"],
+            base_id=self.conf_global["credentials"]["airtable"]["base_id"],
+            table_name=self.conf["airtable"].get("table_name", "Annuaire"),
         )
 
     
@@ -68,7 +96,7 @@ class SyncHelloAsso:
         filter_date: datetime,
     ) -> None:
         """
-        Sync user subscriptions to webhook and mailing list.
+        Sync user subscriptions to Airtable and mailing list.
         
         Args:
             subscriptions: List of UserSubscription objects
@@ -83,18 +111,64 @@ class SyncHelloAsso:
             
             # Filter by date
             if subscription.subscription_date >= filter_date:
-                # Send to webhook
-                success = self.webhook_client.send_subscription(subscription)
+                # Sync to Airtable
+                fields = subscription.to_airtable_payload()
                 
-                if not success:
+                if self.dry_run == "full":
+                    # Full dry run: don't write anything
+                    syslog.syslog(
+                        syslog.LOG_INFO,
+                        f"[DRY RUN] Would sync {subscription.email} to Airtable with fields: {list(fields.keys())}",
+                    )
+                    print(f"  [DRY RUN] Airtable: {subscription.email} - {subscription.first_name} {subscription.last_name}")
+                    result = True  # Simulate success
+                else:
+                    result = self.airtable_client.upsert_record(
+                        email=subscription.email,
+                        fields=fields,
+                    )
+                
+                if not result:
                     syslog.syslog(
                         syslog.LOG_ERR,
-                        f"Failed to send subscription for {subscription.email}",
+                        f"Failed to sync {subscription.email} to Airtable",
                     )
                     continue
                 
                 # Add to OVH mailing list
-                self.ovh_client.add_subscriber(subscription.email)
+                if self.dry_run in ("full", "only_airtable"):
+                    # Full dry run or only_airtable: don't add to mailing list
+                    syslog.syslog(
+                        syslog.LOG_INFO,
+                        f"[DRY RUN {self.dry_run}] Would add {subscription.email} to mailing list",
+                    )
+                    print(f"  [DRY RUN] Mailing list: {subscription.email}")
+                else:
+                    self.ovh_mailing_client.add_subscriber(subscription.email)
+                
+                # Send confirmation email if email client is configured
+                if self.ovh_email_client and self.conf.get("ovh", {}).get("email", {}).get("send_confirmation"):
+                    email_config = self.conf["ovh"]["email"]
+                    try:
+                        # dry_run pour send_email : True si mode "full", "only_mail", ou "only_airtable", False sinon
+                        email_dry_run = self.dry_run in ("full", "only_mail", "only_airtable")
+                        self.ovh_email_client.send_email(
+                            sender=email_config["from"],
+                            to=[subscription.email],
+                            subject=email_config.get("subject", "Bienvenue !"),
+                            body_html=email_config.get("body_html", f"<p>Bonjour {subscription.first_name},</p><p>Merci pour votre inscription !</p>"),
+                            body_text=email_config.get("body_text", f"Bonjour {subscription.first_name}, Merci pour votre inscription !"),
+                            dry_run=email_dry_run,
+                        )
+                        syslog.syslog(
+                            syslog.LOG_INFO,
+                            f"Confirmation email sent to {subscription.email}",
+                        )
+                    except Exception as e:
+                        syslog.syslog(
+                            syslog.LOG_ERR,
+                            f"Failed to send confirmation email to {subscription.email}: {str(e)}",
+                        )
             
             processed_emails.add(subscription.email)
 
@@ -155,8 +229,16 @@ class SyncHelloAsso:
         # Sync subscriptions
         self.sync_subscriptions(subscriptions, filter_date)
         
-        # Update config with current date
-        self.update_date_conf()
+        # Update config with current date (only in production mode)
+        if self.dry_run is None:
+            self.update_date_conf()
+        else:
+            syslog.syslog(
+                syslog.LOG_INFO,
+                f"[DRY RUN {self.dry_run}] Would update subscription_after date in config",
+            )
+            if self.dry_run == "full":
+                print(f"  [DRY RUN] Config: subscription_after date NOT updated")
 
 
 if __name__ == "__main__":

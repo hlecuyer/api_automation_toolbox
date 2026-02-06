@@ -19,24 +19,41 @@ class UserSubscription:
     # Optional fields from HelloAsso
     state: str = "Processed"
     
-    def to_webhook_payload(self) -> Dict[str, str]:
+    def to_airtable_payload(self) -> Dict[str, str]:
         """
-        Convert the subscription to a webhook payload format.
+        Convert the subscription to an Airtable payload format.
         
         Returns:
-            Dictionary with all fields formatted for webhook.
+            Dictionary with all fields formatted for Airtable.
         """
         payload = {
-            "email": self.email,
-            "firstName": self.first_name,
-            "lastName": self.last_name.upper(),
-            "date": self.subscription_date.isoformat(),
-            "cotisation": self.cotisation,
-            "groupe": self.groupe,
+            "E-mail": self.email,
+            "Prénom": self.first_name,
+            "Nom": self.last_name.upper(),
+            # "Date d'adhésion" is a computed field in Airtable, don't send it
+            "Cotisation LCDC": self.cotisation,
+            "Groupe(s)": self.groupe,
         }
         
-        # Add custom fields
-        payload.update(self.custom_fields)
+        # Mapping explicite des custom fields HelloAsso → Airtable
+        custom_field_mapping = {
+            "Genre": "Genre",
+            "Structure": "Structure(s)",
+            # "Date de naissance": "date de naissance",  # Format incompatible, à convertir
+            "Fonction au sein de votre structure": "Fonction (structure)",
+            "Intérêts (mot-clés)": "Intérêts",
+            "Localisation (code postal)": "code postal",
+            "Visible sur le site": "Visible sur le site",
+            "Règles de Confidentialité": "Règles de Confidentialité",
+        }
+        
+        # Ajouter uniquement les custom fields qui existent dans le mapping
+        for helloasso_field, airtable_field in custom_field_mapping.items():
+            if helloasso_field in self.custom_fields:
+                value = self.custom_fields[helloasso_field]
+                # N'ajouter que si la valeur n'est pas vide
+                if value:
+                    payload[airtable_field] = value
         
         return payload
     

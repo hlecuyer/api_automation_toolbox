@@ -4,9 +4,10 @@ This directory contains comprehensive tests for the HelloAsso sync application.
 
 ## Test Files
 
-- **`test_refactored_code.py`**: Tests unitaires pour la nouvelle architecture (9 tests)
-- **`test_hello_asso_sync_functional.py`**: Tests fonctionnels avec vraie API HelloAsso (6 tests)
-- **`test_hello_asso_sync.py`**: Tests unitaires legacy (22 tests, maintenu pour référence)
+- **`test_functional.py`**: Tests fonctionnels avec vraies APIs (8 tests) - HelloAsso, Airtable, OVH
+- **`test_refactored_code.py`**: Tests unitaires architecture (8 tests)
+- **`test_airtable_client.py`**: Tests unitaires Airtable (20 tests)
+- **`test_ovh_email_client.py`**: Tests unitaires OVH Email (14 tests)
 
 ## Test Coverage - Nouvelle Architecture
 
@@ -15,7 +16,7 @@ La suite de tests `test_refactored_code.py` couvre:
 - **UserSubscription Model** (3 tests)
   - Data parsing from HelloAsso API response
   - Field transformation (uppercase, year conversion)
-  - Webhook payload generation
+  - Airtable payload generation
 
 - **HelloAssoClient** (1 test)
   - Subscription parsing with real data structure
@@ -24,8 +25,15 @@ La suite de tests `test_refactored_code.py` couvre:
   - Adding subscribers to mailing lists
   - Handling duplicate subscriber conflicts (ResourceConflictError)
 
-- **WebhookClient** (1 test)
-  - Sending UserSubscription data to webhooks
+- **AirtableClient** (20 tests)
+  - CRUD operations on Airtable records
+  - Upsert functionality (find or create)
+  - Dry-run mode
+
+- **OVHEmailClient** (14 tests)
+  - Sending emails via OVH API
+  - Email validation
+  - Dry-run mode
 
 - **SyncHelloAsso Integration** (2 tests)
   - Full workflow with all three clients
@@ -33,7 +41,7 @@ La suite de tests `test_refactored_code.py` couvre:
 
 ## Test Coverage - Legacy Architecture
 
-La suite de tests `test_hello_asso_sync.py` couvre :
+## Tests Disponibles
 
 - **Configuration & Authentication** (6 tests)
 - **Form Management** (4 tests)
@@ -68,10 +76,10 @@ pytest tests/ -v
 pytest tests/test_refactored_code.py -v
 
 # Tests fonctionnels (API réelle HelloAsso)
-pytest tests/test_hello_asso_sync_functional.py -v -s
+pytest tests/test_functional.py -v -s
 
 # Tests legacy
-pytest tests/test_hello_asso_sync.py -v
+pytest tests/test_refactored_code.py tests/test_airtable_client.py tests/test_ovh_email_client.py -v
 ```
 
 ### Run with Coverage Report
@@ -121,24 +129,38 @@ The tests use:
 2. **Mocked External Dependencies**: Les tests unitaires mockent :
    - HelloAsso API calls
    - OVH API calls
-   - Webhook/Zapier calls
+   - Airtable/OVH calls
    - File system operations
 
-3. **Tests Fonctionnels**: Les tests dans `test_hello_asso_sync_functional.py` utilisent la **vraie API HelloAsso** mais mockent OVH et les webhooks pour un mode dry-run sécurisé.
+3. **Tests Fonctionnels**: Les tests dans `test_functional.py` utilisent les **vraies APIs** (HelloAsso, Airtable, OVH) avec rollback automatique.
 
 Ceci garantit que les tests unitaires sont rapides et ne dépendent pas de services externes, tout en validant l'intégration réelle avec HelloAsso.
 
 ## Code Coverage
 
-- **Nouvelle architecture**: 9/9 tests passent
-- **Tests fonctionnels**: 6/6 tests passent (avec vraie API HelloAsso)
-- **Tests legacy**: 22 tests (maintenus pour référence)
+**Total : 61 tests, 89% de couverture globale**
+
+- `test_refactored_code.py` : **17 tests** (UserSubscription, HelloAssoClient, OVHMailingClient, SyncHelloAsso, error handling, config validation)
+- `test_functional.py` : **8 tests** (HelloAsso, Airtable, OVH Email/Mailing - APIs réelles)
+- `test_airtable_client.py` : **20 tests** (CRUD, upsert, dry-run)
+- `test_ovh_email_client.py` : **14 tests** (email sending, validation, dry-run)
+
+**Couverture par module :**
+- `airtable_client.py` : 99%
+- `ovh_email_client.py` : 98%
+- `user_subscription.py` : 91%
+- `config_loader.py` : 88%
+- `hello_asso_client.py` : 86%
+- `ovh_client.py` : 83%
+- `hello_asso_sync.py` : 74%
+
+**Note :** La couverture de 89% couvre tous les chemins principaux. Les 11% restants sont principalement des cas d'erreur rares (échecs réseau, fichiers illisibles, etc.).
 
 ## Contributing
 
 When adding new features to `hello_asso_sync.py`:
 
-1. Add corresponding tests in `test_hello_asso_sync.py`
+1. Add corresponding tests in `test_refactored_code.py` or `test_functional.py`
 2. Run the test suite to ensure all tests pass
-3. Verify coverage remains above 90%
+3. Verify coverage: `pytest --cov=src --cov-report=term-missing`
 4. Update this README if new test categories are added

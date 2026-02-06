@@ -5,6 +5,24 @@
 ```
 api_automation_toolbox/
 │
+├── config/                           # Configuration
+│   ├── hello-asso-automation-conf.json          # Config principale (gitignored)
+│   ├── hello-asso-automation-conf-test.json     # Config tests (gitignored)
+│   └── hello-asso-automation-conf.json.example  # Template
+│
+├── docs/                             # Documentation
+│   ├── setup/                        # Guides de configuration
+│   │   ├── AIRTABLE_PERMISSIONS_FIX.md
+│   │   ├── AIRTABLE_SETUP.md
+│   │   ├── FIX_AIRTABLE_TESTS.md
+│   │   └── FUNCTIONAL_TESTS_SUMMARY.md
+│   ├── CREDENTIALS_GUIDE.md
+│   ├── FUNCTIONAL_TESTS_NEW.md
+│   └── ...
+│
+├── scripts/                          # Scripts utilitaires
+│   └── check_airtable_config.py     # Vérification config Airtable
+│
 ├── src/                              # Code source principal
 │   ├── __init__.py
 │   ├── hello_asso_sync.py           # Orchestrateur principal
@@ -17,14 +35,16 @@ api_automation_toolbox/
 │   └── clients/                      # Clients pour services externes
 │       ├── __init__.py
 │       ├── hello_asso_client.py      # Client API HelloAsso
-│       ├── ovh_client.py             # Client API OVH
-│       └── webhook_client.py         # Client webhook Zapier/Airtable
+│       ├── airtable_client.py        # Client Airtable direct
+│       ├── ovh_client.py             # Client listes OVH
+│       └── ovh_email_client.py       # Client email OVH
 │
 ├── tests/                            # Tests
 │   ├── __init__.py
-│   ├── test_hello_asso_sync.py      # Anciens tests unitaires
-│   ├── test_refactored_code.py      # Tests unitaires (nouvelle architecture)
-│   └── test_hello_asso_sync_functional.py  # Tests fonctionnels (API réelle)
+│   ├── test_functional.py            # Tests fonctionnels (8 tests)
+│   ├── test_refactored_code.py       # Tests unitaires architecture (8)
+│   ├── test_airtable_client.py       # Tests unitaires Airtable (20)
+│   └── test_ovh_email_client.py      # Tests unitaires OVH Email (14)
 │
 ├── docs/                             # Documentation
 │   ├── README.md                     # Documentation principale
@@ -52,12 +72,12 @@ api_automation_toolbox/
 ### `/src` - Code Source
 Tout le code de production, organisé selon le pattern de séparation des responsabilités :
 - **`/models`** : Objets de données typés (dataclasses) pour représenter les données métier
-- **`/clients`** : Classes dédiées à chaque service externe (HelloAsso, OVH, Webhooks)
+- **`/clients`** : Classes dédiées à chaque service externe (HelloAsso, OVH, Airtable)
 - **Orchestrateur** : `hello_asso_sync.py` coordonne les différents clients
 
 ### `/tests` - Tests
 - **Tests unitaires** : Rapides, avec mocks, valident la logique
-- **Tests fonctionnels** : Connexion réelle HelloAsso, mocks webhook/OVH
+- **Tests fonctionnels** : Connexion réelle HelloAsso, mocks Airtable/OVH
 
 ### `/docs` - Documentation
 Toute la documentation centralisée pour faciliter la maintenance.

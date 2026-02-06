@@ -59,6 +59,28 @@ def load_config(config_path):
     if os.getenv("OVH_CONSUMER_KEY"):
         config["credentials"]["ovh"]["ck"] = os.getenv("OVH_CONSUMER_KEY")
     
+    # Airtable credentials from env vars
+    if "airtable" not in config["credentials"]:
+        config["credentials"]["airtable"] = {}
+    
+    if os.getenv("AIRTABLE_API_KEY"):
+        config["credentials"]["airtable"]["api_key"] = os.getenv("AIRTABLE_API_KEY")
+    if os.getenv("AIRTABLE_BASE_ID"):
+        config["credentials"]["airtable"]["base_id"] = os.getenv("AIRTABLE_BASE_ID")
+    
+    # SMTP credentials from env vars
+    if "smtp" not in config["credentials"]:
+        config["credentials"]["smtp"] = {}
+    
+    if os.getenv("SMTP_HOST"):
+        config["credentials"]["smtp"]["host"] = os.getenv("SMTP_HOST")
+    if os.getenv("SMTP_PORT"):
+        config["credentials"]["smtp"]["port"] = int(os.getenv("SMTP_PORT"))
+    if os.getenv("SMTP_USER"):
+        config["credentials"]["smtp"]["user"] = os.getenv("SMTP_USER")
+    if os.getenv("SMTP_PASSWORD"):
+        config["credentials"]["smtp"]["password"] = os.getenv("SMTP_PASSWORD")
+    
     # Validate required fields
     _validate_config(config)
     
@@ -91,8 +113,3 @@ def _validate_config(config):
             f"Credentials should be in your .env file.\n"
             f"Other configuration should be in your JSON config file."
         )
-
-
-def get_test_webhook_url():
-    """Get test webhook URL from environment (optional)"""
-    return os.getenv("WEBHOOK_URL_TEST")

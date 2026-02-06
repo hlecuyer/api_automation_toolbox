@@ -43,9 +43,9 @@ OVH_CONSUMER_KEY=votre_consumer_key
 OVH_MAILING_LIST_NAME=votre_liste
 OVH_MAILING_LIST_DOMAIN=votredomaine.org
 
-# Airtable/Webhook
-WEBHOOK_URL=https://hooks.airtable.com/workflows/v1/PROD_ID
-WEBHOOK_URL_TEST=https://hooks.airtable.com/workflows/v1/TEST_ID
+# Airtable
+AIRTABLE_API_KEY=votre_api_key_ou_personal_access_token
+AIRTABLE_BASE_ID=votre_base_id
 
 # Autres
 COTISATION_LABEL=votre_label
@@ -121,7 +121,7 @@ sync = SyncHelloAsso("config.json")
 Les tests unitaires continuent de fonctionner avec des configs mockées :
 
 ```bash
-pytest test_hello_asso_sync.py -v
+pytest tests/ -v
 ```
 
 ### Tests fonctionnels (vraies APIs)
@@ -138,7 +138,7 @@ Puis :
 ```bash
 # Charge .env.test au lieu de .env
 export $(cat .env.test | xargs)
-pytest test_hello_asso_sync_functional.py -v -s
+pytest tests/test_functional.py -v -s
 ```
 
 ---

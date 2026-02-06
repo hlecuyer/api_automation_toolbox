@@ -9,6 +9,8 @@ dry_run_data.json
 .env.local
 hello-asso-automation-conf.json
 hello-asso-automation-conf-test.json
+config/hello-asso-automation-conf.json
+config/hello-asso-automation-conf-test.json
 .coverage
 .coverage.*
 htmlcov/

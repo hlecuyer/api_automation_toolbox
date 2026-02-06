@@ -1,238 +1,202 @@
-# Tests Fonctionnels HelloAsso Sync
+# Tests Fonctionnels
 
 ## Vue d'ensemble
 
-Les tests fonctionnels se connectent **réellement à l'API HelloAsso** pour valider l'intégration, mais **mockent les appels aux webhooks Zapier et à l'API OVH** pour éviter d'envoyer des données pendant les tests.
+La suite de tests fonctionnels (`tests/test_functional.py`) teste les connexions réelles aux APIs:
+- **HelloAsso**: Authentification et récupération de données
+- **Airtable**: CRUD sur les utilisateurs
+- **OVH Email**: Envoi d'emails
+- **OVH Mailing List**: Gestion de liste de diffusion
 
-## ⚠️ Important
+## Prérequis
 
-**Ce qui est testé avec de vraies connexions :**
-- ✅ Authentification HelloAsso
-- ✅ Récupération des formulaires
-- ✅ Récupération des données d'adhésions
-
-**Ce qui est mocké (pas d'envoi réel) :**
-- 🚫 Webhooks Zapier/Airtable - **AUCUN envoi**
-- 🚫 API OVH mailing list - **AUCUN appel**
-
-## Configuration
-
-### 1. Créer le fichier de configuration de test
-
-Copiez le template :
+### Variables d'environnement (.env)
 
 ```bash
-cp hello-asso-automation-conf.json.example hello-asso-automation-conf-test.json
-```
+# HelloAsso
+HELLOASSO_CLIENT_ID=your_client_id
+HELLOASSO_CLIENT_SECRET=your_client_secret
+HELLOASSO_API_URL=https://api.helloasso.com
 
-Remplissez avec **votre vraie configuration HelloAsso** (les webhooks ne seront pas appelés) :
+# Airtable
+AIRTABLE_API_KEY=patXXXXXXXXXXXX.XXXXX
+AIRTABLE_BASE_ID=appXXXXXXXXXXXXXX  # Doit commencer par 'app'
 
-```json
-{
-  "conf": {
-    "helloAsso": {
-      "api_url": "https://api.helloasso.com",
-      "organization_name": "votre-org",
-      "form_name": "Votre Formulaire",
-      "subscription_after": "2024-01-01T00:00:00"
-    },
-    "webhook_url": "https://hooks.zapier.com/... (ne sera pas appelé)"
-  }
-}
-```
-
-### 2. Créer le fichier `.env` avec vos credentials
-
-```bash
-cp .env.example .env
-```
-
-Remplissez `.env` avec vos **vraies credentials HelloAsso** :
-
-```env
-HELLOASSO_CLIENT_ID=votre_client_id
-HELLOASSO_CLIENT_SECRET=votre_client_secret
-
-# OVH (peut être vide, l'API est mockée)
+# OVH
 OVH_ENDPOINT=ovh-eu
-OVH_APP_KEY=dummy
-OVH_APP_SECRET=dummy
-OVH_CONSUMER_KEY=dummy
+OVH_APP_KEY=your_app_key
+OVH_APP_SECRET=your_app_secret
+OVH_CONSUMER_KEY=your_consumer_key
 ```
 
-**Important** : Ajoutez `hello-asso-automation-conf-test.json` à votre `.gitignore` !
+### Installation
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Exécution des tests
 
 ### Tous les tests fonctionnels
+
 ```bash
-pytest test_hello_asso_sync_functional.py -v -s
+pytest tests/test_functional.py -v -s
 ```
 
-### Tests spécifiques
+### Tests par connexion
 
-**Test de connexion HelloAsso :**
 ```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_real_connection_to_helloasso -v -s
+# HelloAsso seulement
+pytest tests/test_functional.py::TestHelloAssoConnection -v -s
+
+# Airtable seulement
+pytest tests/test_functional.py::TestAirtableConnection -v -s
+
+# OVH Email seulement
+pytest tests/test_functional.py::TestOVHEmailConnection -v -s
+
+# OVH Mailing List seulement
+pytest tests/test_functional.py::TestOVHMailingListConnection -v -s
 ```
 
-**Test de récupération de données :**
-```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_get_form_data_from_helloasso -v -s
-```
+### Test spécifique
 
-**Test du workflow complet (mocké) :**
 ```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_sync_workflow_without_sending -v -s
-```
-
-**Dry run (inspection des données) :**
-```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_dry_run_data_inspection -v -s
-```
-
-**Inspection des appels webhook et OVH :**
-```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_inspect_webhook_and_ovh_data -v -s
+pytest tests/test_functional.py::TestHelloAssoConnection::test_get_real_users -v -s
 ```
 
 ## Description des tests
 
-### test_real_connection_to_helloasso
-- ✅ Teste la connexion à l'API HelloAsso
-- ✅ Vérifie l'authentification
-- ✅ Récupère les détails du formulaire
-- 🚫 Ne touche pas aux webhooks ou OVH
+### TestHelloAssoConnection
 
-### test_get_form_data_from_helloasso
-- ✅ Récupère les données réelles de HelloAsso
-- ✅ Affiche le nombre d'enregistrements
-- ✅ Affiche les statistiques (processed, etc.)
-- 🚫 N'envoie rien nulle part
+#### test_authentication
+- **Objectif**: Vérifier l'authentification HelloAsso
+- **Actions**: 
+  - Initialise le client
+  - Vérifie que le token est obtenu
+  - Vérifie que les headers sont configurés
+- **Résultat attendu**: ✓ Token valide avec longueur > 0
 
-### test_sync_workflow_without_sending
-- ✅ Récupère les données de HelloAsso
-- ✅ Exécute la logique de synchronisation
-- 🔶 Mock les appels webhook (comptabilisés mais pas envoyés)
-- 🔶 Mock les appels OVH (comptabilisés mais pas envoyés)
-- ✅ Affiche combien d'appels auraient été faits
+#### test_get_forms
+- **Objectif**: Récupérer les formulaires HelloAsso
+- **Actions**:
+  - Authentification
+  - Récupère le formulaire "Adhésion année 2026"
+- **Résultat attendu**: ✓ Formulaire trouvé avec slug et type
 
-### test_dry_run_data_inspection
-- ✅ Récupère les données de HelloAsso
-- ✅ Sauvegarde dans un fichier JSON pour inspection
-- ✅ Affiche des statistiques détaillées
-- ✅ Montre un échantillon de données
-- 🚫 N'envoie rien
+#### test_get_real_users
+- **Objectif**: Récupérer de vrais utilisateurs
+- **Actions**:
+  - Récupère les items du formulaire 2026
+  - Filtre les items "Processed"
+  - Affiche un échantillon
+- **Résultat attendu**: ✓ Liste d'utilisateurs avec emails
 
-### test_inspect_webhook_and_ovh_data
-- ✅ Récupère les données de HelloAsso
-- ✅ Traite les données comme pour un envoi réel
-- 📊 **Affiche en détail** ce qui serait envoyé aux webhooks
-- 📊 **Affiche en détail** ce qui serait envoyé à OVH
-- 🔶 Mock les appels (capture mais n'envoie pas)
-- ✅ Parfait pour valider le format des données
+### TestAirtableConnection
 
-### test_authentication_token_valid
-- ✅ Vérifie que le token d'authentification est valide
-- ✅ Fait un appel API simple pour tester
-- 🚫 Ne manipule aucune donnée
+#### test_list_records
+- **Objectif**: Lister les enregistrements Airtable
+- **Actions**:
+  - Liste jusqu'à 5 enregistrements
+  - Affiche les IDs
+- **Résultat attendu**: ✓ Liste retournée (peut être vide)
 
-### test_complete_sync_workflow_mocked (slow)
-- ✅ Exécute le workflow complet `sync.run()`
-- 🔶 Tous les appels externes sont mockés sauf HelloAsso
-- ⚠️ Marqué comme `@pytest.mark.slow`
+#### test_create_and_delete_user
+- **Objectif**: Test CRUD - Création et suppression
+- **Actions**:
+  1. Crée un utilisateur de test (email: `test-YYYYMMDDHHMMSS@test-automation.local`)
+  2. Vérifie que l'enregistrement existe
+  3. Supprime l'enregistrement (cleanup)
+- **Résultat attendu**: ✓ Création + suppression réussies
+- **Note**: Skip si `AIRTABLE_BASE_ID` invalide (doit commencer par 'app')
 
-## Workflow recommandé
+#### test_update_and_rollback_user
+- **Objectif**: Test CRUD - Mise à jour et rollback
+- **Actions**:
+  1. Trouve un enregistrement existant
+  2. Modifie le champ `Nom` 
+  3. Vérifie la mise à jour
+  4. Restaure la valeur originale (rollback)
+- **Résultat attendu**: ✓ Mise à jour + rollback réussis
+- **Note**: Skip si aucun enregistrement disponible
 
-### 1. Développement - Tests unitaires avec mocks
-```bash
-pytest test_hello_asso_sync.py -v
+### TestOVHEmailConnection
+
+#### test_send_test_email
+- **Objectif**: Tester l'envoi d'email
+- **Actions**:
+  - Prépare un email pour `support@dsi.coop`
+  - Envoie en mode DRY RUN (pas d'envoi réel)
+- **Résultat attendu**: ✓ Email préparé sans erreur
+- **Protection**: **Pas d'envoi sur de vrais users** (uniquement dry-run vers support@)
+
+### TestOVHMailingListConnection
+
+#### test_connection
+- **Objectif**: Vérifier l'initialisation du client
+- **Actions**:
+  - Initialise le client mailing list
+  - Vérifie les attributs (domain, list name)
+- **Résultat attendu**: ✓ Client correctement initialisé
+
+## Résultats attendus
+
+```
+tests/test_functional.py::TestHelloAssoConnection::test_authentication PASSED
+tests/test_functional.py::TestHelloAssoConnection::test_get_forms PASSED
+tests/test_functional.py::TestHelloAssoConnection::test_get_real_users PASSED
+tests/test_functional.py::TestAirtableConnection::test_list_records PASSED
+tests/test_functional.py::TestAirtableConnection::test_create_and_delete_user SKIPPED*
+tests/test_functional.py::TestAirtableConnection::test_update_and_rollback_user SKIPPED*
+tests/test_functional.py::TestOVHEmailConnection::test_send_test_email PASSED
+tests/test_functional.py::TestOVHMailingListConnection::test_connection PASSED
+
+6 passed, 2 skipped
 ```
 
-### 2. Validation HelloAsso - Test de connexion
-```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_real_connection_to_helloasso -v -s
-```
+\* *Skipped si configuration Airtable incomplète ou base vide*
 
-### 3. Inspection des données - Dry run
-```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_dry_run_data_inspection -v -s
-```
+## Tests unitaires
 
-Les données sont sauvegardées dans `/tmp/pytest-xxx/helloasso_data_inspection.json`
-
-### 4. Test du workflow - Sans envoi réel
-```bash
-pytest test_hello_asso_sync_functional.py::TestFunctionalSync::test_sync_workflow_without_sending -v -s
-```
-
-Vous verrez combien d'appels webhook/OVH auraient été faits, sans rien envoyer réellement.
-
-### 5. Production - Avec vraie config
-Une fois validé, utilisez votre vraie config de production.
-
-## Variables d'environnement
-
-Spécifiez un fichier de config personnalisé :
+Les tests unitaires (mockés) restent disponibles:
 
 ```bash
-export FUNCTIONAL_TEST_CONFIG=/path/to/your/config.json
-pytest test_hello_asso_sync_functional.py -v -s
+# Tous les tests unitaires
+pytest tests/test_airtable_client.py tests/test_ovh_email_client.py tests/test_refactored_code.py -v
+
+# Total: 42 tests unitaires passent
 ```
 
-## Sécurité et Bonnes Pratiques
+## Tous les tests (unitaires + fonctionnels)
 
-✅ **Tests sans risque :**
-- Aucun webhook n'est appelé
-- Aucune donnée n'est envoyée à OVH
-- Seule l'API HelloAsso est interrogée (lecture seule)
+```bash
+pytest tests/ -v
 
-✅ **Credentials protégées :**
-- `.env` dans `.gitignore`
-- `hello-asso-automation-conf-test.json` dans `.gitignore`
-- Ne commitez jamais vos credentials
-
-✅ **Données réelles :**
-- Les tests utilisent vos vraies données HelloAsso
-- Utile pour valider le parsing et la logique métier
-- Aucun risque d'envoi accidentel
+# Résultat attendu: 48 passed, 2 skipped
+```
 
 ## Dépannage
 
-### Erreur : "Functional test config not found"
+### "Invalid Airtable base_id"
+- Vérifier que `AIRTABLE_BASE_ID` commence par `app`
+- Format correct: `appXXXXXXXXXXXXXX`
 
-→ Créez `hello-asso-automation-conf-test.json` depuis le template
+### "No records available"
+- La table Airtable est vide
+- Les tests de mise à jour seront skipped automatiquement
 
-### Erreur : "Missing required configuration fields"
+### Erreurs d'authentification HelloAsso
+- Vérifier `HELLOASSO_CLIENT_ID` et `HELLOASSO_CLIENT_SECRET`
+- Les credentials doivent être valides et actifs
 
-→ Vérifiez que `.env` contient vos credentials HelloAsso
+### Erreurs OVH
+- Vérifier toutes les variables `OVH_*`
+- Le consumer key doit être validé
 
-### Erreur d'authentification HelloAsso
+## Sécurité
 
-→ Vérifiez que vos credentials dans `.env` sont correctes
-
-### Je veux tester les vrais webhooks
-
-⚠️ **Ce n'est pas le but de ces tests !** Pour tester les webhooks :
-1. Utilisez un environnement de staging dédié
-2. Ou créez des tests d'intégration séparés avec des webhooks de test
-
-## Prochaines étapes
-
-Quand vous migrez de Zapier vers Airtable directement :
-1. Créez de nouveaux tests pour l'API Airtable
-2. Moquez Airtable dans les tests fonctionnels
-3. Créez des tests d'intégration séparés pour Airtable
-
-## Résumé
-
-🎯 **Ces tests valident :**
-- ✅ Connexion HelloAsso
-- ✅ Récupération de données
-- ✅ Logique de traitement
-- ✅ Workflow complet
-
-🚫 **Sans jamais envoyer de données vers :**
-- Webhooks Zapier/Airtable
-- API OVH
-- Aucun service externe (sauf HelloAsso en lecture)
+- ✅ **Pas d'envoi d'email sur de vrais users** (uniquement support@dsi.coop en dry-run)
+- ✅ **Cleanup automatique** des enregistrements de test Airtable
+- ✅ **Rollback automatique** des modifications de test
+- ✅ **Credentials dans .env** (jamais committé)
+- ✅ **Tests isolés** - pas d'effet de bord entre tests

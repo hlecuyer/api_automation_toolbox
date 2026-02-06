@@ -51,7 +51,9 @@ Le fichier JSON contient **uniquement** la configuration non-sensible :
     },
     "cotisation_label": "Payé 2025",
     "groupe": "Membres",
-    "webhook_url": "https://hooks.zapier.com/...",
+    "airtable": {
+      "table_name": "Annuaire"
+    },
     "ovh": {
       "mailing_list": {
         "name": "membres",
@@ -144,7 +146,7 @@ Gardez uniquement la section `conf`.
 Les tests utilisent des mocks, pas besoin de `.env` :
 
 ```bash
-pytest test_hello_asso_sync.py -v
+pytest tests/test_refactored_code.py -v
 ```
 
 ### Tests Fonctionnels
@@ -152,7 +154,7 @@ pytest test_hello_asso_sync.py -v
 Créez un `.env` avec vos vraies credentials :
 
 ```bash
-pytest test_hello_asso_sync_functional.py -v -s
+pytest tests/test_functional.py -v -s
 ```
 
 ---

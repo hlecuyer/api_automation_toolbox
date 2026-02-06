@@ -11,7 +11,7 @@ import argparse
 import os
 
 
-# Class to sync data from hello-asso to airtable using zapier automation with webhooks
+# Class to sync data from hello-asso to Airtable
 class CheckOvhMailinglist:
     # init class loading config file value
     def __init__(self, config_path):

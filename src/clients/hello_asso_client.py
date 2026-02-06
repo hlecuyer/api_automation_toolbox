@@ -83,12 +83,39 @@ class HelloAssoClient:
                 timeout=10,
             )
             response.raise_for_status()
-            data = response.json()["data"]
+            response_data = response.json()
+            
+            # Handle different response formats from HelloAsso API
+            # Try "records" first (current API), then "data" (old API), then direct list
+            if isinstance(response_data, dict):
+                if "records" in response_data:
+                    data = response_data["records"]
+                elif "data" in response_data:
+                    data = response_data["data"]
+                else:
+                    syslog.syslog(
+                        syslog.LOG_WARNING,
+                        f"Unexpected dict keys from HelloAsso API: {response_data.keys()}",
+                    )
+                    return {}
+            elif isinstance(response_data, list):
+                data = response_data
+            else:
+                syslog.syslog(
+                    syslog.LOG_WARNING,
+                    f"Unexpected response format from HelloAsso API: {type(response_data)}",
+                )
+                return {}
             
             for item in data:
                 if item["title"] == form_name:
                     return item
             
+            # If not found, log available forms for debugging
+            syslog.syslog(
+                syslog.LOG_INFO,
+                f"Form '{form_name}' not found. Available forms: {[f.get('title', 'N/A') for f in data[:5]]}",
+            )
             return {}
         except Exception as e:
             syslog.syslog(

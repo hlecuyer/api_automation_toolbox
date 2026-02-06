@@ -24,8 +24,17 @@
             "mailing_list": {
                 "domain": "coopdescommuns.org",
                 "name": "membres"
+            },
+            "email": {
+                "from": "contact@coopdescommuns.org",
+                "subject": "Bienvenue à la Coop des Communs !",
+                "body_html": "<p>Bonjour,</p><p>Merci pour votre inscription à la Coop des Communs !</p>",
+                "body_text": "Bonjour, Merci pour votre inscription à la Coop des Communs !",
+                "send_confirmation": false
             }
         },
-        "webhook_url": "https://hooks.zapier.com/hooks/******"
+        "airtable": {
+            "table_name": "Annuaire"
+        }
     }
 }

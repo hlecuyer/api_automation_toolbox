@@ -1,12 +1,12 @@
 # HelloAsso Automation Tool
 
-The HelloAsso Automation Tool is a Python application that extracts data from the HelloAsso API and feeds it to a Zapier webhook. It also updates an OVH mailing list using the OVH API.
+The HelloAsso Automation Tool is a Python application that extracts data from the HelloAsso API and syncs it directly to Airtable. It also updates an OVH mailing list using the OVH API.
 
 ## Description
 
-The HelloAsso Automation Tool queries the HelloAsso API to retrieve subscribers who have completed payment on the form specified in the configuration file. It then sends subscriber information to a Zapier webhook to fill an Airtable database using Zapier automation.
+The HelloAsso Automation Tool queries the HelloAsso API to retrieve subscribers who have completed payment on the form specified in the configuration file. It then sends subscriber information directly to an Airtable database.
 
-If passing data to the Zapier webhook succeeds, the script then updates an OVH mailing list using the OVH API.
+If passing data to Airtable succeeds, the script then updates an OVH mailing list using the OVH API.
 
 ## Architecture
 
@@ -15,10 +15,11 @@ The project follows a clean architecture pattern with separation of concerns:
 - **Models** (`src/models/`): Typed data classes
   - `UserSubscription`: Represents a user subscription with all fields from HelloAsso
 
-- **Clients** (`src/clients/`): Service-specific clients
+- **Clients** (`src/clients/`):
   - `HelloAssoClient`: Handles HelloAsso API authentication and data retrieval
   - `OVHMailingClient`: Manages OVH mailing list subscriptions
-  - `WebhookClient`: Sends data to Zapier/Airtable webhooks
+  - `AirtableClient`: Direct integration with Airtable API for user directory management
+  - `OVHEmailClient`: Sends confirmation emails via OVH
 
 - **Orchestrator** (`src/hello_asso_sync.py`): Coordinates all clients to execute the full workflow   
 
@@ -87,6 +88,6 @@ Or using the virtual environment:
 This will:
 1. Authenticate with HelloAsso API
 2. Retrieve new subscriptions from the specified form
-3. Send each subscription to the Zapier webhook
+3. Sync each subscription directly to Airtable
 4. Add subscribers to the OVH mailing list
 5. Update the configuration file with the latest sync date
