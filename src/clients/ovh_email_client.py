@@ -3,7 +3,8 @@ import syslog
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List, Optional, Dict
+from email.mime.image import MIMEImage
+from typing import List, Optional, Dict, Tuple
 import ovh
 
 
@@ -60,11 +61,12 @@ class OVHEmailClient:
         body_html: Optional[str] = None,
         cc: Optional[List[str]] = None,
         bcc: Optional[List[str]] = None,
+        inline_images: Optional[List[Tuple[str, bytes, str]]] = None,
         dry_run: bool = False,
     ) -> bool:
         """
         Send an email via SMTP.
-        
+
         Args:
             sender: Sender email address
             to: List of recipient email addresses
@@ -73,6 +75,7 @@ class OVHEmailClient:
             body_html: HTML body (optional)
             cc: List of CC recipients (optional)
             bcc: List of BCC recipients (optional)
+            inline_images: List of (content_id, image_data, mime_subtype) tuples for inline images
             dry_run: If True, don't make actual SMTP calls
             
         Returns:
@@ -111,30 +114,45 @@ class OVHEmailClient:
             
         try:
             # Create message
-            msg = MIMEMultipart('alternative')
+            from email.utils import formatdate, make_msgid
+
+            if inline_images:
+                # Use related > alternative structure for inline images
+                msg = MIMEMultipart('related')
+                msg_alt = MIMEMultipart('alternative')
+                msg.attach(msg_alt)
+            else:
+                msg = MIMEMultipart('alternative')
+                msg_alt = msg
+
             msg['From'] = sender
             msg['To'] = ', '.join(to)
             msg['Subject'] = subject
-            
-            # Add important headers to avoid spam filters
-            from email.utils import formatdate, make_msgid
             msg['Date'] = formatdate(localtime=True)
             msg['Message-ID'] = make_msgid(domain=sender.split('@')[1] if '@' in sender else 'mail.local')
-            
+
             if cc:
                 msg['Cc'] = ', '.join(cc)
-            
+
             # Add body (at least one is required)
             if not body_html and not body_text:
                 raise ValueError("At least one of body_text or body_html must be provided")
-            
+
             if body_text:
                 part_text = MIMEText(body_text, 'plain', 'utf-8')
-                msg.attach(part_text)
-            
+                msg_alt.attach(part_text)
+
             if body_html:
                 part_html = MIMEText(body_html, 'html', 'utf-8')
-                msg.attach(part_html)
+                msg_alt.attach(part_html)
+
+            # Attach inline images
+            if inline_images:
+                for content_id, image_data, subtype in inline_images:
+                    img = MIMEImage(image_data, _subtype=subtype)
+                    img.add_header('Content-ID', f'<{content_id}>')
+                    img.add_header('Content-Disposition', 'inline', filename=f'{content_id}.{subtype}')
+                    msg.attach(img)
             
             # Prepare recipient list (to + cc + bcc)
             all_recipients = to.copy()
