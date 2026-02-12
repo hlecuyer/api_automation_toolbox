@@ -244,7 +244,13 @@ class SyncHelloAsso:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--conf", help="path to a config file")
+    parser.add_argument(
+        "--dry-run",
+        choices=["only_airtable", "only_mail", "full"],
+        default=None,
+        help="dry run mode: only_airtable, only_mail, or full",
+    )
     args = parser.parse_args()
 
-    hello_asso_sync = SyncHelloAsso(args.conf)
+    hello_asso_sync = SyncHelloAsso(args.conf, dry_run=args.dry_run)
     hello_asso_sync.run()
