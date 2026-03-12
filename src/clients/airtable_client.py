@@ -242,13 +242,13 @@ class AirtableClient:
         dry_run: bool = False,
     ) -> List[Dict]:
         """
-        List records from Airtable table.
-        
+        List records from Airtable table with automatic pagination.
+
         Args:
             max_records: Maximum number of records to return
             filter_by_formula: Airtable formula to filter records
             dry_run: If True, don't make actual API calls
-            
+
         Returns:
             List of record dicts
         """
@@ -258,24 +258,40 @@ class AirtableClient:
                 "[DRY RUN] Would list records",
             )
             return []
-            
+
         try:
-            params = {}
-            if max_records:
-                params["maxRecords"] = max_records
-            if filter_by_formula:
-                params["filterByFormula"] = filter_by_formula
-            
-            response = requests.get(
-                self.base_url,
-                headers=self.headers,
-                params=params,
-                timeout=10,
-            )
-            response.raise_for_status()
-            
-            return response.json().get("records", [])
-            
+            all_records = []
+            offset = None
+
+            while True:
+                params = {}
+                if max_records:
+                    params["maxRecords"] = max_records
+                if filter_by_formula:
+                    params["filterByFormula"] = filter_by_formula
+                if offset:
+                    params["offset"] = offset
+
+                response = requests.get(
+                    self.base_url,
+                    headers=self.headers,
+                    params=params,
+                    timeout=10,
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                all_records.extend(data.get("records", []))
+
+                offset = data.get("offset")
+                if not offset:
+                    break
+
+                if max_records and len(all_records) >= max_records:
+                    break
+
+            return all_records
+
         except Exception as e:
             syslog.syslog(
                 syslog.LOG_ERR,
