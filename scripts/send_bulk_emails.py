@@ -43,6 +43,31 @@ if LOGO_PATH.exists():
         LOGO_INLINE_IMAGES = [("logo", f.read(), "png")]
 
 
+DATA_DIR = Path(__file__).parent / "data"
+MIME_BY_EXT = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def load_attachments(template: dict) -> list:
+    """Load attachment files declared in a template's "attachments" key."""
+    paths = template.get("attachments") or []
+    loaded = []
+    for name in paths:
+        path = DATA_DIR / name
+        if not path.exists():
+            print(f"⚠️  Pièce jointe introuvable: {path}")
+            continue
+        mime = MIME_BY_EXT.get(path.suffix.lower(), "application/octet-stream")
+        with open(path, "rb") as f:
+            loaded.append((path.name, f.read(), mime))
+    return loaded
+
+
 def parse_csv(csv_path: str) -> Dict[str, List[str]]:
     """
     Parse le fichier CSV et retourne un dictionnaire avec les emails par catégorie.
@@ -53,18 +78,19 @@ def parse_csv(csv_path: str) -> Dict[str, List[str]]:
     Returns:
         Dict avec les noms de colonnes comme clés et listes d'emails comme valeurs
     """
-    emails_by_category = {
-        "Adherent 2025": [],
-        "Adherent 2024": [],
-        "GT non adherent": [],
-        "Evenement non adherent": []
-    }
-    
     print(f"\n📄 Lecture du fichier CSV: {csv_path}")
-    
+
+    emails_by_category = {}
+
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        
+
+        # Initialiser les catégories à partir des en-têtes du CSV
+        for col in (reader.fieldnames or []):
+            col = col.strip()
+            if col:
+                emails_by_category[col] = []
+
         for row in reader:
             for category in emails_by_category.keys():
                 email = row.get(category, '').strip()
@@ -113,18 +139,21 @@ def send_emails(
     for category, emails in emails_by_category.items():
         if not emails:
             continue
-            
+
         template = EMAIL_TEMPLATES[category]
-        
+        attachments = load_attachments(template)
+
         print(f"\n📮 Catégorie: {category}")
         print(f"   Sujet: {template['subject']}")
         print(f"   Destinataires: {len(emails)}")
+        if attachments:
+            print(f"   Pièces jointes: {', '.join(a[0] for a in attachments)}")
         print("-" * 80)
-        
+
         for i, recipient in enumerate(emails, 1):
             try:
                 print(f"   [{i}/{len(emails)}] Envoi à {recipient}...", end=" ")
-                
+
                 result = client.send_email(
                     sender=sender,
                     to=[recipient],
@@ -132,6 +161,7 @@ def send_emails(
                     body_text=template['body_text'],
                     body_html=template['body_html'],
                     inline_images=LOGO_INLINE_IMAGES,
+                    attachments=attachments or None,
                     dry_run=dry_run
                 )
                 
@@ -165,24 +195,30 @@ def test_mode(
     client: OVHEmailClient,
     sender: str,
     test_email: str,
-    dry_run: bool = False
+    dry_run: bool = False,
+    templates: Dict[str, dict] = None
 ) -> None:
     """
-    Mode test : envoie les 4 types de mails à une seule adresse de test.
-    
+    Mode test : envoie les types de mails sélectionnés à une seule adresse de test.
+
     Args:
         client: Client OVH Email
         sender: Adresse email de l'expéditeur
         test_email: Adresse email de test
         dry_run: Si True, simule l'envoi
+        templates: Dict de templates à envoyer (défaut: tous)
     """
+    if templates is None:
+        templates = EMAIL_TEMPLATES
+
+    total = len(templates)
     print("=" * 80)
     print("🧪 MODE TEST ACTIVÉ")
     print("=" * 80)
-    print(f"Envoi des 4 types de mails à: {test_email}\n")
-    
-    for i, (category, template) in enumerate(EMAIL_TEMPLATES.items(), 1):
-        print(f"[{i}/4] Envoi du mail '{category}'...", end=" ")
+    print(f"Envoi de {total} type(s) de mail à: {test_email}\n")
+
+    for i, (category, template) in enumerate(templates.items(), 1):
+        print(f"[{i}/{total}] Envoi du mail '{category}'...", end=" ")
         
         # Ajouter une note dans le sujet pour le mode test
         test_subject = f"[TEST] {template['subject']}"
@@ -196,6 +232,7 @@ def test_mode(
         """
         
         try:
+            attachments = load_attachments(template)
             result = client.send_email(
                 sender=sender,
                 to=[test_email],
@@ -203,6 +240,7 @@ def test_mode(
                 body_text=f"[MODE TEST - {category}]\n\n{template['body_text']}",
                 body_html=test_body_html,
                 inline_images=LOGO_INLINE_IMAGES,
+                attachments=attachments or None,
                 dry_run=dry_run
             )
             
@@ -212,7 +250,7 @@ def test_mode(
                 print("✗ Échec")
                 
             # Petit délai entre les emails
-            if i < len(EMAIL_TEMPLATES):
+            if i < total:
                 time.sleep(1)
                 
         except Exception as e:
@@ -229,8 +267,7 @@ def main():
     )
     parser.add_argument(
         '--csv',
-        required=True,
-        help='Chemin vers le fichier CSV avec les emails'
+        help='Chemin vers le fichier CSV avec les emails (requis sauf en mode --test)'
     )
     parser.add_argument(
         '--sender',
@@ -264,6 +301,11 @@ def main():
         help='Mode test: envoie les 4 types de mails à cette adresse de test'
     )
     parser.add_argument(
+        '--template',
+        metavar='NAME',
+        help='Envoie uniquement ce template (ex: "Relance Adherent 2025"). Utilisable avec --test.'
+    )
+    parser.add_argument(
         '--dry-run',
         action='store_true',
         help='Simule l\'envoi sans envoyer réellement les emails'
@@ -277,10 +319,14 @@ def main():
     
     args = parser.parse_args()
     
-    # Vérifier que le fichier CSV existe
-    if not os.path.exists(args.csv):
-        print(f"❌ Erreur: Le fichier CSV '{args.csv}' n'existe pas.")
-        sys.exit(1)
+    # Vérifier que le fichier CSV existe (requis sauf en mode test)
+    if not args.test:
+        if not args.csv:
+            print("❌ Erreur: --csv est requis en mode normal (non-test).")
+            sys.exit(1)
+        if not os.path.exists(args.csv):
+            print(f"❌ Erreur: Le fichier CSV '{args.csv}' n'existe pas.")
+            sys.exit(1)
     
     # Vérifier les credentials SMTP
     if not args.smtp_user or not args.smtp_password:
@@ -306,9 +352,18 @@ def main():
         smtp_password=args.smtp_password
     )
     
+    # Filtrer par template si spécifié
+    templates_to_use = EMAIL_TEMPLATES
+    if args.template:
+        if args.template not in EMAIL_TEMPLATES:
+            print(f"❌ Erreur: Template '{args.template}' introuvable.")
+            print(f"   Templates disponibles: {', '.join(EMAIL_TEMPLATES.keys())}")
+            sys.exit(1)
+        templates_to_use = {args.template: EMAIL_TEMPLATES[args.template]}
+
     if args.test:
         # Mode test
-        test_mode(client, args.sender, args.test, args.dry_run)
+        test_mode(client, args.sender, args.test, args.dry_run, templates_to_use)
     else:
         # Mode normal
         # Demander confirmation en mode production

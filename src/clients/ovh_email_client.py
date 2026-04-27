@@ -4,6 +4,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
 from typing import List, Optional, Dict, Tuple
 import ovh
 
@@ -62,6 +64,7 @@ class OVHEmailClient:
         cc: Optional[List[str]] = None,
         bcc: Optional[List[str]] = None,
         inline_images: Optional[List[Tuple[str, bytes, str]]] = None,
+        attachments: Optional[List[Tuple[str, bytes, str]]] = None,
         dry_run: bool = False,
     ) -> bool:
         """
@@ -76,6 +79,7 @@ class OVHEmailClient:
             cc: List of CC recipients (optional)
             bcc: List of BCC recipients (optional)
             inline_images: List of (content_id, image_data, mime_subtype) tuples for inline images
+            attachments: List of (filename, file_data, mime_type) tuples — mime_type like "application/pdf"
             dry_run: If True, don't make actual SMTP calls
             
         Returns:
@@ -116,14 +120,21 @@ class OVHEmailClient:
             # Create message
             from email.utils import formatdate, make_msgid
 
+            # Build MIME container based on what's present.
+            # Attachments require multipart/mixed wrapping the body parts.
+            msg_alt = MIMEMultipart('alternative')
+
             if inline_images:
-                # Use related > alternative structure for inline images
-                msg = MIMEMultipart('related')
-                msg_alt = MIMEMultipart('alternative')
-                msg.attach(msg_alt)
+                msg_body = MIMEMultipart('related')
+                msg_body.attach(msg_alt)
             else:
-                msg = MIMEMultipart('alternative')
-                msg_alt = msg
+                msg_body = msg_alt
+
+            if attachments:
+                msg = MIMEMultipart('mixed')
+                msg.attach(msg_body)
+            else:
+                msg = msg_body
 
             msg['From'] = sender
             msg['To'] = ', '.join(to)
@@ -146,13 +157,23 @@ class OVHEmailClient:
                 part_html = MIMEText(body_html, 'html', 'utf-8')
                 msg_alt.attach(part_html)
 
-            # Attach inline images
+            # Attach inline images (into the related container alongside the alternative bodies)
             if inline_images:
                 for content_id, image_data, subtype in inline_images:
                     img = MIMEImage(image_data, _subtype=subtype)
                     img.add_header('Content-ID', f'<{content_id}>')
                     img.add_header('Content-Disposition', 'inline', filename=f'{content_id}.{subtype}')
-                    msg.attach(img)
+                    msg_body.attach(img)
+
+            # Attach files (into the outer mixed container)
+            if attachments:
+                for filename, file_data, mime_type in attachments:
+                    maintype, _, subtype = mime_type.partition('/')
+                    part = MIMEBase(maintype or 'application', subtype or 'octet-stream')
+                    part.set_payload(file_data)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment', filename=filename)
+                    msg.attach(part)
             
             # Prepare recipient list (to + cc + bcc)
             all_recipients = to.copy()

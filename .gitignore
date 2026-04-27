@@ -16,3 +16,4 @@ config/hello-asso-automation-conf-test.json
 htmlcov/
 *.cover
 scripts/data/
+planification/
