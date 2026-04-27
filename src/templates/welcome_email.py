@@ -26,7 +26,7 @@ C'est une chance pour nous.
 QUELQUES INFOS UTILES
 
 - Des visios d'accueil sont prévues pour les nouveaux adhérents :
-  24 mars (11h-12h) et 21 avril (17h-18h). Soyez les bienvenus !
+  vous recevrez une invitation après adhésion. Au plaisir de vous retrouver !
 
 - La Newsletter de l'association est envoyée à tous les membres.
 
@@ -98,7 +98,7 @@ BODY_HTML = """<html>
                         <td style="padding: 24px 32px 0 32px;">
                             <h2 style="margin:0 0 8px 0; font-size: 16px; color:#4B4B4D;">Quelques infos utiles</h2>
                             <ul style="margin: 0 0 0 18px; padding: 0;">
-                                <li style="margin-bottom: 8px;">Des <strong>visios d'accueil</strong> sont prévues pour les nouveaux adhérents : <strong>24 mars (11h-12h)</strong> et <strong>21 avril (17h-18h)</strong> — soyez les bienvenus !</li>
+                                <li style="margin-bottom: 8px;">Des <strong>visios d'accueil</strong> sont prévues pour les nouveaux adhérents : vous recevrez une invitation après adhésion. Au plaisir de vous retrouver !</li>
                                 <li style="margin-bottom: 8px;">La <strong>Newsletter</strong> de l'association est envoyée à tous les membres.</li>
                                 <li style="margin-bottom: 8px;">Sauf avis contraire, nous vous inscrivons sur la liste d'échanges <em>ess-communs</em>, qui diffuse au fil de l'eau des informations à la croisée des communs et de l'ESS. Si vous avez utilisé plusieurs adresses, l'équipe <a href="https://dsi.coop" style="color:#3CB1D4;">DSI.coop</a> vous contactera pour n'en garder qu'une.</li>
                                 <li style="margin-bottom: 0;">Les <strong>groupes de travail</strong> vous sont ouverts. Si l'un d'eux vous motive, dites-le — un·e animateur·ice vous briefera et vous accueillera.</li>
