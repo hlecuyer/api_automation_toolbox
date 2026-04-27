@@ -8,14 +8,14 @@ PERSONALIZED_EMAIL_TEMPLATES = {
     "10 ans intervenants": {
         "subject": "INVITATION La Coop des Communs a 10 ans cette année !",
         "attachments": ["🎉 INVITATION La Coop des Communs a 10 ans cette année.pdf"],
-        "body_text": """Cher.e {prenom},
+        "body_text": """{genre} {prenom},
 
 La Coop des Communs a dix ans cette année. Pour cet anniversaire, nous organisons un moment de convivialité et de célébration le samedi 13 juin prochain, de 11h30 à 16h au Jardin d'agronomie tropicale de Paris.
 
-Tu as joué un rôle {role} dans cette aventure. Je serais, nous serions toutes et tous heureux de t'y accueillir et partager ce temps avec toi. Tu peux t'inscrire dès à présent à ce lien :
+Tu as joué un rôle {role} dans cette aventure. Tu trouveras ci-joint le programme de la journée. Je serais, nous serions toutes et tous heureux de t'y accueillir et partager ce temps avec toi. Tu peux t'inscrire dès à présent à ce lien :
 https://airtable.com/appTB6ISLjbexWWIM/shryuemN81hLf3srn
 
-Plus, nous aimerions avoir ton témoignage, sur place si tu peux te joindre, sinon par vidéo, voire par écrit. En sus du plaisir du partage, nous ferons un récit, une base de connaissance de tout cela.
+Plus, nous aimerions avoir ton témoignage, sur place si tu peux te joindre, sinon par vidéo, voire par écrit. Tu peux me l'envoyer à cette adresse mail. En sus du plaisir du partage, nous ferons un récit, une base de connaissance de tout cela.
 
 Si tu as des photos, des documents écrits à partager, merci de les apporter.
 
@@ -32,11 +32,11 @@ coopdescommuns.org
         "body_html": """<html>
 <head></head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <p>Cher.e {prenom},</p>
+    <p>{genre} {prenom},</p>
 
     <p>La Coop des Communs a <strong>dix ans</strong> cette année. Pour cet anniversaire, nous organisons un moment de convivialité et de célébration le <strong>samedi 13 juin prochain, de 11h30 à 16h</strong> au <strong>Jardin d'agronomie tropicale de Paris</strong>.</p>
 
-    <p>Tu as joué un rôle {role} dans cette aventure. Je serais, nous serions toutes et tous heureux de t'y accueillir et partager ce temps avec toi. Tu peux t'inscrire dès à présent à ce lien :</p>
+    <p>Tu as joué un rôle {role} dans cette aventure. Tu trouveras <strong>ci-joint le programme de la journée</strong>. Je serais, nous serions toutes et tous heureux de t'y accueillir et partager ce temps avec toi. Tu peux t'inscrire dès à présent à ce lien :</p>
 
     <p style="margin-top: 20px;">
         <a href="https://airtable.com/appTB6ISLjbexWWIM/shryuemN81hLf3srn"
@@ -45,7 +45,7 @@ coopdescommuns.org
         </a>
     </p>
 
-    <p>Plus, nous aimerions avoir ton témoignage, sur place si tu peux te joindre, sinon par vidéo, voire par écrit. En sus du plaisir du partage, nous ferons un récit, une base de connaissance de tout cela.</p>
+    <p>Plus, nous aimerions avoir ton témoignage, sur place si tu peux te joindre, sinon par vidéo, voire par écrit. Tu peux me l'envoyer à cette adresse mail. En sus du plaisir du partage, nous ferons un récit, une base de connaissance de tout cela.</p>
 
     <p>Si tu as des photos, des documents écrits à partager, merci de les apporter.</p>
 
