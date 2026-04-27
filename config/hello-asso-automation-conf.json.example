@@ -26,10 +26,8 @@
                 "name": "membres"
             },
             "email": {
-                "from": "contact@coopdescommuns.org",
-                "subject": "Bienvenue à la Coop des Communs !",
-                "body_html": "<p>Bonjour,</p><p>Merci pour votre inscription à la Coop des Communs !</p>",
-                "body_text": "Bonjour, Merci pour votre inscription à la Coop des Communs !",
+                "from": "@@SIG_EMAIL@@",
+                "subject": "Bienvenue à La Coop des Communs !",
                 "send_confirmation": false
             }
         },

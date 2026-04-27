@@ -12,6 +12,7 @@ from src.clients import (
     OVHEmailClient,
 )
 from src.models import UserSubscription
+from src.templates import welcome_email
 
 # Class to sync data from hello-asso to Airtable
 
@@ -89,7 +90,18 @@ class SyncHelloAsso:
             table_name=self.conf["airtable"].get("table_name", "Annuaire"),
         )
 
-    
+        # Load welcome email logo for inline embedding (cid:logo)
+        self.logo_inline_images = None
+        try:
+            with open(welcome_email.LOGO_PATH, "rb") as f:
+                self.logo_inline_images = [("logo", f.read(), "png")]
+        except FileNotFoundError:
+            syslog.syslog(
+                syslog.LOG_WARNING,
+                f"Welcome email logo not found at {welcome_email.LOGO_PATH} — emails will be sent without inline logo",
+            )
+
+
     def sync_subscriptions(
         self,
         subscriptions: list[UserSubscription],
@@ -152,12 +164,14 @@ class SyncHelloAsso:
                     try:
                         # dry_run pour send_email : True si mode "full", "only_mail", ou "only_airtable", False sinon
                         email_dry_run = self.dry_run in ("full", "only_mail", "only_airtable")
+                        body_text, body_html = welcome_email.render(subscription.first_name)
                         self.ovh_email_client.send_email(
                             sender=email_config["from"],
                             to=[subscription.email],
-                            subject=email_config.get("subject", "Bienvenue !"),
-                            body_html=email_config.get("body_html", f"<p>Bonjour {subscription.first_name},</p><p>Merci pour votre inscription !</p>"),
-                            body_text=email_config.get("body_text", f"Bonjour {subscription.first_name}, Merci pour votre inscription !"),
+                            subject=email_config.get("subject", welcome_email.SUBJECT),
+                            body_html=body_html,
+                            body_text=body_text,
+                            inline_images=self.logo_inline_images,
                             dry_run=email_dry_run,
                         )
                         syslog.syslog(
