@@ -372,9 +372,13 @@ class AirtableClient:
         Apply computed-field rules to `fields` based on whether this is a CREATE or UPDATE.
 
         - "new_member": always sets the field. CREATE → create_value, UPDATE → update_value.
-        - "first_year_subscription": fills the field from fallback_value if and only if
-          neither the payload nor the existing record already has a value, so we never
-          overwrite a year already on file.
+        - "first_year_subscription": curated Airtable data always wins. We do NOT trust
+          the user's "Est-ce votre première adhésion ?" answer over a value the team has
+          already set on the record. Priority order:
+            1. Existing Airtable value → keep it (drop the field from the PATCH payload)
+            2. HelloAsso payload (year from "Oui") → send it
+            3. fallback_value (if non-empty) → send it
+            4. Otherwise → leave the column empty
 
         Mutates `fields` in place.
         """
@@ -393,18 +397,21 @@ class AirtableClient:
         if first_year_conf and "field" in first_year_conf:
             field_name = first_year_conf["field"]
             fallback = first_year_conf.get("fallback_value")
-            if not fallback:
-                return
-            if field_name in fields and fields[field_name]:
-                # Already in payload (HelloAsso said "Oui" → year). Don't overwrite.
-                return
+
             existing_value = (
                 existing_record.get("fields", {}).get(field_name)
                 if existing_record
                 else None
             )
-            if not existing_value:
-                fields[field_name] = fallback
+
+            if existing_value:
+                # Curated value on Airtable wins, even over a HelloAsso "Oui" → year.
+                # Drop the field from the payload so the PATCH doesn't touch it.
+                fields.pop(field_name, None)
+            elif field_name not in fields or not fields[field_name]:
+                # No existing value AND no HelloAsso year → use fallback if configured.
+                if fallback:
+                    fields[field_name] = fallback
 
     def upsert_record(self, email: str, fields: Dict, dry_run: bool = False) -> Optional[Dict]:
         """

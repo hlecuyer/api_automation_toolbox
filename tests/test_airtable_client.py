@@ -385,6 +385,20 @@ class TestAirtableClientComputedFields:
         computed_client._apply_computed_fields(fields, existing_record=existing)
         assert fields["Nouvel Adherent"] == "Non"
 
+    def test_update_path_existing_value_beats_helloasso_year(self, computed_client):
+        """Curated Airtable value always wins over HelloAsso self-declared year:
+        even if the payload carries a year (user said 'Oui' in form), the existing
+        Airtable value must be preserved untouched. We don't trust the user against
+        data the team has already curated."""
+        fields = {"E-mail": "vet@example.com", "Année de première adhésion": "2026"}
+        existing = {
+            "id": "rec1",
+            "fields": {"Année de première adhésion": "2022"},
+        }
+        computed_client._apply_computed_fields(fields, existing_record=existing)
+        # Field removed from payload → PATCH doesn't touch it → Airtable keeps "2022"
+        assert "Année de première adhésion" not in fields
+
     def test_update_path_preserves_existing_first_year(self, computed_client):
         """On UPDATE, an existing year on Airtable must NOT be overwritten by the fallback."""
         fields = {"E-mail": "vet@example.com"}
