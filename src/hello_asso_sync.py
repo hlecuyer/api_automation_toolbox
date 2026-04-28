@@ -88,6 +88,7 @@ class SyncHelloAsso:
             api_key=self.conf_global["credentials"]["airtable"]["api_key"],
             base_id=self.conf_global["credentials"]["airtable"]["base_id"],
             table_name=self.conf["airtable"].get("table_name", "Annuaire"),
+            linked_records=self.conf["airtable"].get("linked_records"),
         )
 
         # Load welcome email logo for inline embedding (cid:logo)

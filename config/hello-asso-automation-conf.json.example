@@ -32,7 +32,19 @@
             }
         },
         "airtable": {
-            "table_name": "Annuaire"
+            "table_name": "Annuaire",
+            "linked_records": {
+                "Groupe(s)": {
+                    "linked_table": "Liste des groupes",
+                    "match_field": "Nom",
+                    "on_missing": "warn"
+                },
+                "Structure(s)": {
+                    "linked_table": "Structures",
+                    "match_field": "Nom",
+                    "on_missing": "create"
+                }
+            }
         }
     }
 }
