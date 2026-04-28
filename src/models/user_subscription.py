@@ -35,7 +35,9 @@ class UserSubscription:
             "Groupe(s)": self.groupe,
         }
         
-        # Mapping explicite des custom fields HelloAsso → Airtable
+        # Mapping explicite des custom fields HelloAsso → Airtable.
+        # Clés = libellés exacts des questions HelloAsso (formulaire "Adhésion année 2026").
+        # Valeurs = noms de colonnes Airtable dans la table Annuaire.
         custom_field_mapping = {
             "Genre": "Genre",
             "Structure": "Structure(s)",
@@ -43,7 +45,9 @@ class UserSubscription:
             "Fonction au sein de votre structure": "Fonction (structure)",
             "Intérêts (mot-clés)": "Intérêts",
             "Localisation (code postal)": "code postal",
-            "Visible sur le site": "Visible sur le site",
+            "Je souhaite que mon nom et prénom soient partagés sur le site web de l'association dans la liste des adhérent·es": "Visible sur le site",
+            "Souhaitez-vous partager les informations précédentes avec les autres adhérent·es de la Coop des Communs ? Pour information, les champs suivants seront uniquement accessibles par l'équipe de gestion de l'association et les prestataires missionnés.": "Partage de donnée autorisé",
+            "Si oui, pouvez-vous nous indiquer deux personnes connues au sein de l'association ?": "2 personnes connues",
             "Règles de Confidentialité": "Règles de Confidentialité",
         }
         

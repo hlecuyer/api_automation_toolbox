@@ -91,7 +91,7 @@ class TestUserSubscription:
     def test_to_airtable_payload(self):
         """Test conversion to Airtable payload"""
         from datetime import datetime
-        
+
         sub = UserSubscription(
             email="test@example.com",
             first_name="John",
@@ -101,16 +101,85 @@ class TestUserSubscription:
             groupe="test_group",
             custom_fields={"field1": "value1"}
         )
-        
+
         payload = sub.to_airtable_payload()
-        
+
         # Check Airtable field names (with French naming convention)
         assert payload["E-mail"] == "test@example.com"
         assert payload["Prénom"] == "John"
         assert payload["Nom"] == "DOE"  # Uppercase
         assert payload["Cotisation LCDC"] == "test_label"
         assert payload["Groupe(s)"] == "test_group"
-    
+
+    def test_to_airtable_payload_maps_long_helloasso_keys(self):
+        """The three long-phrase HelloAsso keys must land under their short Airtable column names.
+        Regression test for the bug where these were silently dropped from the upsert payload."""
+        from datetime import datetime
+
+        helloasso_visible_key = (
+            "Je souhaite que mon nom et prénom soient partagés sur le site web "
+            "de l'association dans la liste des adhérent·es"
+        )
+        helloasso_partage_key = (
+            "Souhaitez-vous partager les informations précédentes avec les autres "
+            "adhérent·es de la Coop des Communs ? Pour information, les champs suivants "
+            "seront uniquement accessibles par l'équipe de gestion de l'association "
+            "et les prestataires missionnés."
+        )
+        helloasso_2personnes_key = (
+            "Si oui, pouvez-vous nous indiquer deux personnes connues "
+            "au sein de l'association ?"
+        )
+
+        sub = UserSubscription(
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            subscription_date=datetime(2026, 4, 28, 10, 50),
+            cotisation="Payé 2026",
+            groupe="Adhérent·es la Coop des Communs",
+            custom_fields={
+                helloasso_visible_key: "Oui",
+                helloasso_partage_key: "Non",
+                helloasso_2personnes_key: "Alice, Bob",
+            },
+        )
+
+        payload = sub.to_airtable_payload()
+
+        assert payload["Visible sur le site"] == "Oui"
+        assert payload["Partage de donnée autorisé"] == "Non"
+        assert payload["2 personnes connues"] == "Alice, Bob"
+        # And the long HelloAsso phrases must NOT leak through as Airtable column names
+        assert helloasso_visible_key not in payload
+        assert helloasso_partage_key not in payload
+        assert helloasso_2personnes_key not in payload
+
+    def test_to_airtable_payload_skips_empty_custom_fields(self):
+        """Empty values in custom_fields must not be sent to Airtable
+        (preserves existing behaviour after the mapping fix)."""
+        from datetime import datetime
+
+        sub = UserSubscription(
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            subscription_date=datetime(2026, 4, 28, 10, 50),
+            cotisation="Payé 2026",
+            groupe="Adhérent·es la Coop des Communs",
+            custom_fields={
+                "Genre": "Masculin",
+                "Structure": "",  # Empty — must be dropped
+                "Fonction au sein de votre structure": "Dev",
+            },
+        )
+
+        payload = sub.to_airtable_payload()
+
+        assert payload["Genre"] == "Masculin"
+        assert payload["Fonction (structure)"] == "Dev"
+        assert "Structure(s)" not in payload
+
     def test_from_hello_asso_item(self):
         """Test creating UserSubscription from HelloAsso API item"""
         item = {
