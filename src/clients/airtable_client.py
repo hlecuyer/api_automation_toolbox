@@ -15,6 +15,7 @@ class AirtableClient:
         base_id: str,
         table_name: str = "Annuaire",
         linked_records: Optional[Dict[str, Dict]] = None,
+        computed_fields: Optional[Dict[str, Dict]] = None,
     ):
         """
         Initialize Airtable client.
@@ -26,6 +27,15 @@ class AirtableClient:
             linked_records: Optional mapping of field name → {linked_table, match_field, on_missing}.
                 on_missing is "warn" (drop the field) or "create" (create the linked record).
                 Used by upsert_record to resolve string values to record IDs.
+            computed_fields: Optional dict of fields whose value depends on the upsert context
+                (whether the record is being created or updated). Recognized keys:
+                - "new_member": {"field": str, "create_value": str, "update_value": str} —
+                   always sets the field to create_value on CREATE, update_value on UPDATE.
+                - "first_year_subscription": {"field": str, "fallback_value": str} —
+                   on CREATE, sets the field to fallback_value if it isn't already in the
+                   payload (e.g. HelloAsso didn't say "Oui" to "first adhésion?"). On UPDATE,
+                   only fills it if both the payload and the existing record are missing it,
+                   so historical values are preserved.
         """
         self.api_key = api_key
         self.base_id = base_id
@@ -38,6 +48,7 @@ class AirtableClient:
             "Content-Type": "application/json",
         }
         self.linked_records = linked_records or {}
+        self.computed_fields = computed_fields or {}
         # In-process cache to avoid re-querying linked tables for the same name
         # Key: (linked_table, match_field, value) → record_id
         self._linked_record_cache: Dict[tuple, str] = {}
@@ -352,6 +363,49 @@ class AirtableClient:
 
             fields[field_name] = ids
 
+    def _apply_computed_fields(
+        self,
+        fields: Dict,
+        existing_record: Optional[Dict],
+    ) -> None:
+        """
+        Apply computed-field rules to `fields` based on whether this is a CREATE or UPDATE.
+
+        - "new_member": always sets the field. CREATE → create_value, UPDATE → update_value.
+        - "first_year_subscription": fills the field from fallback_value if and only if
+          neither the payload nor the existing record already has a value, so we never
+          overwrite a year already on file.
+
+        Mutates `fields` in place.
+        """
+        is_create = existing_record is None
+
+        new_member_conf = self.computed_fields.get("new_member")
+        if new_member_conf and "field" in new_member_conf:
+            field_name = new_member_conf["field"]
+            fields[field_name] = (
+                new_member_conf.get("create_value", "Oui")
+                if is_create
+                else new_member_conf.get("update_value", "Non")
+            )
+
+        first_year_conf = self.computed_fields.get("first_year_subscription")
+        if first_year_conf and "field" in first_year_conf:
+            field_name = first_year_conf["field"]
+            fallback = first_year_conf.get("fallback_value")
+            if not fallback:
+                return
+            if field_name in fields and fields[field_name]:
+                # Already in payload (HelloAsso said "Oui" → year). Don't overwrite.
+                return
+            existing_value = (
+                existing_record.get("fields", {}).get(field_name)
+                if existing_record
+                else None
+            )
+            if not existing_value:
+                fields[field_name] = fallback
+
     def upsert_record(self, email: str, fields: Dict, dry_run: bool = False) -> Optional[Dict]:
         """
         Create or update a record based on email (upsert operation).
@@ -387,6 +441,10 @@ class AirtableClient:
             # before sending. Merges with existing IDs on UPDATE.
             if self.linked_records:
                 self._apply_linked_records(fields, existing_record)
+
+            # Apply create/update-aware computed fields (Nouvel Adherent, fallback year, …)
+            if self.computed_fields:
+                self._apply_computed_fields(fields, existing_record)
 
             if existing_record:
                 return self.update_record(existing_record["id"], fields)

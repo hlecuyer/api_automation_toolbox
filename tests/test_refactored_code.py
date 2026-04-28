@@ -116,8 +116,9 @@ class TestUserSubscription:
         Regression test for the bug where these were silently dropped from the upsert payload."""
         from datetime import datetime
 
+        # NB: HelloAsso uses capital N and P in "Nom et Prénom" — case must match exactly.
         helloasso_visible_key = (
-            "Je souhaite que mon nom et prénom soient partagés sur le site web "
+            "Je souhaite que mon Nom et Prénom soient partagés sur le site web "
             "de l'association dans la liste des adhérent·es"
         )
         helloasso_partage_key = (
@@ -154,6 +155,55 @@ class TestUserSubscription:
         assert helloasso_visible_key not in payload
         assert helloasso_partage_key not in payload
         assert helloasso_2personnes_key not in payload
+
+    def test_first_sub_field_oui_becomes_year(self):
+        """When HelloAsso first_sub_field == 'Oui', from_hello_asso_item replaces
+        the answer with the subscription year, and to_airtable_payload maps it
+        to 'Année de première adhésion'."""
+        first_sub_question = "Est-ce votre première adhésion à la coop des communs ?"
+        item = {
+            "state": "Processed",
+            "payer": {"email": "newbie@example.com"},
+            "user": {"firstName": "Alice", "lastName": "Newman"},
+            "order": {"date": "2026-04-28T10:50:00.000+02:00"},
+            "customFields": [
+                {"name": first_sub_question, "answer": "Oui"},
+            ],
+        }
+        sub = UserSubscription.from_hello_asso_item(
+            item=item,
+            cotisation="Payé 2026",
+            groupe="Adhérent·es la Coop des Communs",
+            first_sub_field=first_sub_question,
+        )
+        assert sub.custom_fields[first_sub_question] == "2026"
+
+        payload = sub.to_airtable_payload()
+        assert payload["Année de première adhésion"] == "2026"
+
+    def test_first_sub_field_non_is_dropped(self):
+        """When HelloAsso first_sub_field == 'Non', it must be removed from
+        custom_fields so the upsert layer can fill the fallback label."""
+        first_sub_question = "Est-ce votre première adhésion à la coop des communs ?"
+        item = {
+            "state": "Processed",
+            "payer": {"email": "veteran@example.com"},
+            "user": {"firstName": "Bob", "lastName": "Old"},
+            "order": {"date": "2026-04-28T10:50:00.000+02:00"},
+            "customFields": [
+                {"name": first_sub_question, "answer": "Non"},
+            ],
+        }
+        sub = UserSubscription.from_hello_asso_item(
+            item=item,
+            cotisation="Payé 2026",
+            groupe="Adhérent·es la Coop des Communs",
+            first_sub_field=first_sub_question,
+        )
+        assert first_sub_question not in sub.custom_fields
+
+        payload = sub.to_airtable_payload()
+        assert "Année de première adhésion" not in payload
 
     def test_to_airtable_payload_skips_empty_custom_fields(self):
         """Empty values in custom_fields must not be sent to Airtable

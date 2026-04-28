@@ -336,6 +336,95 @@ class TestAirtableClientDryRun:
         """Test upsert_record returns mock data in dry-run mode"""
         fields = {"Email": "test@example.com", "Name": "Test User"}
         record = airtable_client.upsert_record("test@example.com", fields, dry_run=True)
-        
+
         assert record is not None
         assert record["fields"] == fields
+
+
+class TestAirtableClientComputedFields:
+    """Tests for the create/update-aware computed fields applied during upsert"""
+
+    @pytest.fixture
+    def computed_client(self):
+        return AirtableClient(
+            api_key="k",
+            base_id="b",
+            table_name="Annuaire",
+            computed_fields={
+                "new_member": {
+                    "field": "Nouvel Adherent",
+                    "create_value": "Oui",
+                    "update_value": "Non",
+                },
+                "first_year_subscription": {
+                    "field": "Année de première adhésion",
+                    "fallback_value": "Avant 2026",
+                },
+            },
+        )
+
+    def test_create_path_sets_new_member_oui_and_fallback_year(self, computed_client):
+        """On CREATE, Nouvel Adherent='Oui' and the fallback year is filled when missing."""
+        fields = {"E-mail": "newbie@example.com", "Prénom": "Alice"}
+        computed_client._apply_computed_fields(fields, existing_record=None)
+        assert fields["Nouvel Adherent"] == "Oui"
+        assert fields["Année de première adhésion"] == "Avant 2026"
+
+    def test_create_path_keeps_helloasso_year_in_payload(self, computed_client):
+        """If HelloAsso said 'Oui' to first adhésion, the year is already in the payload
+        and the fallback must NOT overwrite it."""
+        fields = {"E-mail": "newbie@example.com", "Année de première adhésion": "2026"}
+        computed_client._apply_computed_fields(fields, existing_record=None)
+        assert fields["Année de première adhésion"] == "2026"
+        assert fields["Nouvel Adherent"] == "Oui"
+
+    def test_update_path_sets_new_member_non(self, computed_client):
+        """On UPDATE, Nouvel Adherent='Non' (member is no longer new)."""
+        fields = {"E-mail": "vet@example.com"}
+        existing = {"id": "rec1", "fields": {"Nouvel Adherent": "Oui"}}
+        computed_client._apply_computed_fields(fields, existing_record=existing)
+        assert fields["Nouvel Adherent"] == "Non"
+
+    def test_update_path_preserves_existing_first_year(self, computed_client):
+        """On UPDATE, an existing year on Airtable must NOT be overwritten by the fallback."""
+        fields = {"E-mail": "vet@example.com"}
+        existing = {
+            "id": "rec1",
+            "fields": {"Année de première adhésion": "2022"},
+        }
+        computed_client._apply_computed_fields(fields, existing_record=existing)
+        # We don't add the field to the payload — Airtable keeps its 2022 value.
+        assert "Année de première adhésion" not in fields
+
+    def test_update_path_fills_first_year_when_record_has_none(self, computed_client):
+        """On UPDATE, if the existing record has no year either, fill from fallback."""
+        fields = {"E-mail": "vet@example.com"}
+        existing = {"id": "rec1", "fields": {"Prénom": "Bob"}}
+        computed_client._apply_computed_fields(fields, existing_record=existing)
+        assert fields["Année de première adhésion"] == "Avant 2026"
+
+    def test_empty_fallback_value_is_a_noop_for_first_year(self):
+        """When fallback_value is empty (current prod config), the year field must NOT
+        be set on the payload — Airtable should keep its column empty."""
+        client = AirtableClient(
+            api_key="k",
+            base_id="b",
+            table_name="t",
+            computed_fields={
+                "first_year_subscription": {
+                    "field": "Année de première adhésion",
+                    "fallback_value": "",
+                },
+            },
+        )
+        fields = {"E-mail": "x@example.com"}
+        client._apply_computed_fields(fields, existing_record=None)
+        assert "Année de première adhésion" not in fields
+
+    def test_no_computed_fields_config_is_a_noop(self):
+        """Clients without computed_fields must not touch the payload."""
+        client = AirtableClient(api_key="k", base_id="b", table_name="t")
+        fields = {"E-mail": "x@example.com"}
+        # _apply_computed_fields must be safe to call with empty config
+        client._apply_computed_fields(fields, existing_record=None)
+        assert fields == {"E-mail": "x@example.com"}

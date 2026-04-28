@@ -45,9 +45,10 @@ class UserSubscription:
             "Fonction au sein de votre structure": "Fonction (structure)",
             "Intérêts (mot-clés)": "Intérêts",
             "Localisation (code postal)": "code postal",
-            "Je souhaite que mon nom et prénom soient partagés sur le site web de l'association dans la liste des adhérent·es": "Visible sur le site",
+            "Je souhaite que mon Nom et Prénom soient partagés sur le site web de l'association dans la liste des adhérent·es": "Visible sur le site",
             "Souhaitez-vous partager les informations précédentes avec les autres adhérent·es de la Coop des Communs ? Pour information, les champs suivants seront uniquement accessibles par l'équipe de gestion de l'association et les prestataires missionnés.": "Partage de donnée autorisé",
             "Si oui, pouvez-vous nous indiquer deux personnes connues au sein de l'association ?": "2 personnes connues",
+            "Est-ce votre première adhésion à la coop des communs ?": "Année de première adhésion",
             "Règles de Confidentialité": "Règles de Confidentialité",
         }
         
@@ -100,10 +101,15 @@ class UserSubscription:
         date_str = item["order"]["date"].split("+")[0].split(".")[0]
         subscription_date = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
         
-        # Handle first subscription field
+        # Handle first subscription field:
+        # "Oui" → store the current year (Airtable receives "2026").
+        # Anything else (e.g. "Non", empty default) → drop it so the upsert layer
+        # falls back to the configured first_year_subscription label.
         if first_sub_field and first_sub_field in custom_fields:
             if custom_fields[first_sub_field] == "Oui":
                 custom_fields[first_sub_field] = subscription_date.strftime("%Y")
+            else:
+                del custom_fields[first_sub_field]
         
         # Handle name field uppercase
         if name_field and name_field in custom_fields:

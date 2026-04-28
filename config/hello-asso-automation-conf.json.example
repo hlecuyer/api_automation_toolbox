@@ -44,6 +44,17 @@
                     "match_field": "Nom",
                     "on_missing": "create"
                 }
+            },
+            "computed_fields": {
+                "new_member": {
+                    "field": "Nouvel Adherent",
+                    "create_value": "Oui",
+                    "update_value": "Non"
+                },
+                "first_year_subscription": {
+                    "field": "Année de première adhésion",
+                    "fallback_value": ""
+                }
             }
         }
     }
