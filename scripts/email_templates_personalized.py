@@ -45,7 +45,7 @@ coopdescommuns.org
         </a>
     </p>
 
-    <p>Plus, nous aimerions avoir ton témoignage, sur place si tu peux te joindre, sinon par vidéo, voire par écrit. Tu peux me l'envoyer à cette adresse mail. En sus du plaisir du partage, nous ferons un récit, une base de connaissance de tout cela.</p>
+    <p>Plus, <strong>nous aimerions avoir ton témoignage, sur place si tu peux te joindre, sinon par vidéo, voire par écrit</strong>. Tu peux me l'envoyer à cette adresse mail. En sus du plaisir du partage, nous ferons un récit, une base de connaissance de tout cela.</p>
 
     <p>Si tu as des photos, des documents écrits à partager, merci de les apporter.</p>
 
