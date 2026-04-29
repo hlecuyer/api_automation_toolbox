@@ -1,27 +1,28 @@
-import requests
 import syslog
 import ovh
 from pyairtable import Api
 from pyairtable.formulas import match
 import json
-import string
-from datetime import datetime
-import json
 import argparse
-import os
+
+from src.config_loader import load_config
 
 
-# Class to sync data from hello-asso to Airtable
+REQUIRED_FIELDS = [
+    ("credentials", "airtable", "api_key"),
+    ("credentials", "ovh", "ak"),
+    ("credentials", "ovh", "as"),
+    ("credentials", "ovh", "ck"),
+]
+
+
 class CheckOvhMailinglist:
-    # init class loading config file value
     def __init__(self, config_path):
         self.conf_path = config_path
         try:
-            with open(config_path, "r") as jsonfile:
-                config = json.load(jsonfile)
-                # store the wall config in this var to update the config file
-                self.conf_global = config
-                self.conf = config["conf"]
+            config = load_config(config_path, required_fields=REQUIRED_FIELDS)
+            self.conf_global = config
+            self.conf = config["conf"]
         except Exception as e:
             syslog.syslog(syslog.LOG_ERR, "Failed to load configuration: {}".format(e))
             raise e
@@ -32,7 +33,7 @@ class CheckOvhMailinglist:
             application_secret=self.conf_global["credentials"]["ovh"]["as"],
             consumer_key=self.conf_global["credentials"]["ovh"]["ck"],
         )
-        self.airtable_key = self.conf_global["credentials"]["airtable"]["token"]
+        self.airtable_key = self.conf_global["credentials"]["airtable"]["api_key"]
 
     def AddOvhMailingListSubscriber(self, mailing_list, mail):
         try:

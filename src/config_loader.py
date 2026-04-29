@@ -8,17 +8,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def load_config(config_path):
+def load_config(config_path, required_fields=None):
     """
     Load configuration from JSON file and inject credentials from environment variables.
-    
+
     Priority for credentials:
     1. Environment variables (highest priority) - for sensitive data
     2. JSON config file - for non-sensitive configuration
-    
+
     Args:
         config_path: Path to JSON config file
-        
+        required_fields: Optional list of (key, ...) tuples enumerating dotted
+            paths that MUST be present after env injection. If None, the
+            default HelloAsso-oriented validation list is used (preserves
+            backward compatibility for hello_asso_sync).
+
     Returns:
         dict: Configuration dictionary with credentials from env vars
     """
@@ -82,20 +86,24 @@ def load_config(config_path):
         config["credentials"]["smtp"]["password"] = os.getenv("SMTP_PASSWORD")
     
     # Validate required fields
-    _validate_config(config)
-    
+    _validate_config(config, required_fields)
+
     return config
 
 
-def _validate_config(config):
+_DEFAULT_REQUIRED_FIELDS = [
+    ("credentials", "helloAsso", "id"),
+    ("credentials", "helloAsso", "secret"),
+    ("conf", "helloAsso", "organization_name"),
+    ("conf", "helloAsso", "form_name"),
+]
+
+
+def _validate_config(config, required_fields=None):
     """Validate that required configuration fields are present"""
-    required_fields = [
-        ("credentials", "helloAsso", "id"),
-        ("credentials", "helloAsso", "secret"),
-        ("conf", "helloAsso", "organization_name"),
-        ("conf", "helloAsso", "form_name"),
-    ]
-    
+    if required_fields is None:
+        required_fields = _DEFAULT_REQUIRED_FIELDS
+
     missing_fields = []
     for field_path in required_fields:
         value = config
