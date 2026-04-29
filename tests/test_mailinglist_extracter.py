@@ -101,7 +101,7 @@ def test_auto_sync_removes_extra_subscribers(
 
 @patch("src.mailinglist_extracter.ovh.Client")
 def test_auto_sync_handles_missing_ovh_list_gracefully(
-    _mock_ovh_client, env_credentials, config_path
+    _mock_ovh_client, env_credentials, config_path, capsys
 ):
     import ovh as ovh_module
 
@@ -119,3 +119,17 @@ def test_auto_sync_handles_missing_ovh_list_gracefully(
         {"name": "A", "domain": "example.org"}, "x@y"
     )
     app.DeleteOvhMailinglistSubscriber.assert_not_called()
+    # The non-fatal "list does not exist" warning must reach stderr so
+    # cron's MAILTO surfaces it (syslog alone is invisible to the operator).
+    assert "ERROR" in capsys.readouterr().err
+
+
+def test_main_returns_nonzero_on_failure(tmp_path, capsys):
+    """Top-level catch-all: any exception → stderr message + non-zero exit."""
+    from src.mailinglist_extracter import main
+
+    bogus = str(tmp_path / "does-not-exist.json")
+    rc = main(["-c", bogus])
+
+    assert rc == 1
+    assert "ERROR" in capsys.readouterr().err

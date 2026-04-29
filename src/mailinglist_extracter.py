@@ -333,14 +333,15 @@ class CheckOvhMailinglist:
             self.DeleteMailingListSubscriber()
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--conf", help="path to a config file")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         app = CheckOvhMailinglist(args.conf)
         app.Run()
+        return 0
     except Exception as e:
         # Surface failures via stderr so cron's MAILTO catches them.
         # Stdout is redirected to a log file by the cron command, so the
@@ -348,4 +349,8 @@ if __name__ == "__main__":
         syslog.syslog(syslog.LOG_ERR, "mailinglist_extracter failed: {}".format(e))
         print("ERROR: mailinglist_extracter failed: {}".format(e), file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
