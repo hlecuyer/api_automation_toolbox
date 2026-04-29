@@ -1,4 +1,6 @@
+import sys
 import syslog
+import traceback
 import ovh
 from pyairtable import Api
 from pyairtable.formulas import match
@@ -280,10 +282,9 @@ class CheckOvhMailinglist:
             try:
                 ovh_subscribers.extend(self.GetOvhMailingListSub(mailing_list))
             except ovh.exceptions.ResourceNotFoundError as e:
-                syslog.syslog(
-                    syslog.LOG_ERR,
-                    "The mailing list {} does not exists".format(mailing_list),
-                )
+                msg = "The mailing list {} does not exists".format(mailing_list)
+                syslog.syslog(syslog.LOG_ERR, msg)
+                print("ERROR: " + msg, file=sys.stderr)
             for email in ovh_subscribers:
                 if not any(d == email for d in airtable_subscribers):
                     print("delete " + email + " from " + item)
@@ -337,8 +338,14 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--conf", help="path to a config file")
     args = parser.parse_args()
 
-    app = CheckOvhMailinglist(args.conf)
-
-    app.Run()
-#   standalone call to functio for testing purpose
-#    helloAsso.UpdateDateConf()
+    try:
+        app = CheckOvhMailinglist(args.conf)
+        app.Run()
+    except Exception as e:
+        # Surface failures via stderr so cron's MAILTO catches them.
+        # Stdout is redirected to a log file by the cron command, so the
+        # noisy success path stays out of the inbox.
+        syslog.syslog(syslog.LOG_ERR, "mailinglist_extracter failed: {}".format(e))
+        print("ERROR: mailinglist_extracter failed: {}".format(e), file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
