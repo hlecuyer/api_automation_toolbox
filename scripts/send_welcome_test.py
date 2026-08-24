@@ -28,8 +28,8 @@ def main() -> int:
     parser.add_argument(
         "--from",
         dest="sender",
-        default="@@SIG_EMAIL@@",
-        help="Sender address (default: @@SIG_EMAIL@@)",
+        default=os.getenv("SIGNATURE_EMAIL", "contact@coopdescommuns.org"),
+        help="Sender address (default: $SIGNATURE_EMAIL)",
     )
     parser.add_argument("--env", default=".env", help="Path to .env file (default: .env)")
     args = parser.parse_args()

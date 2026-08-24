@@ -4,6 +4,8 @@ Utilisés par scripts/send_personalized_email.py.
 Le rendu se fait avec str.format(**row), où `row` vient d'une ligne CSV.
 """
 
+from src.templates import signature
+
 PERSONALIZED_EMAIL_TEMPLATES = {
     "10 ans intervenants": {
         "subject": "INVITATION La Coop des Communs a 10 ans cette année !",
@@ -152,3 +154,8 @@ coopdescommuns.org
 """
     }
 }
+
+# La signature porte des données personnelles : elle vient de l'environnement, pas
+# du code. Substituée ici, une fois, pour ne pas risquer d'oublier un gabarit — et
+# avant tout .format(), qui trébucherait sur d'éventuelles accolades.
+PERSONALIZED_EMAIL_TEMPLATES = signature.appliquer_dict(PERSONALIZED_EMAIL_TEMPLATES)

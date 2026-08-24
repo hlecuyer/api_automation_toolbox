@@ -1,11 +1,14 @@
 """Template du mail de bienvenue envoyé à chaque nouvelle adhésion Hello Asso.
 
-Personnalisable par prénom via `{first_name}`. La signature @@SIG_NAME@@ est
-identique à celle de `scripts/email_templates.py`. Le logo est embarqué via
+Personnalisable par prénom via `{first_name}`. La signature est identique à celle
+de `scripts/email_templates.py` : elle porte des données personnelles, donc elle
+vient de l'environnement via `signature`, pas du code. Le logo est embarqué via
 `cid:logo` (à passer en `inline_images` à OVHEmailClient.send_email).
 """
 
 from pathlib import Path
+
+from src.templates import signature
 
 LOGO_PATH = Path(__file__).resolve().parents[2] / "scripts" / "data" / "image.png"
 
@@ -185,4 +188,9 @@ def render(first_name: str) -> tuple[str, str]:
         (body_text, body_html) tuple with `{first_name}` substituted.
     """
     safe_name = (first_name or "").strip() or "à toi"
-    return BODY_TEXT.format(first_name=safe_name), BODY_HTML.format(first_name=safe_name)
+    # La signature est substituée avant le .format() : elle peut contenir n'importe
+    # quel caractère, y compris des accolades, sans faire échouer le rendu.
+    return (
+        signature.appliquer(BODY_TEXT).format(first_name=safe_name),
+        signature.appliquer(BODY_HTML).format(first_name=safe_name),
+    )

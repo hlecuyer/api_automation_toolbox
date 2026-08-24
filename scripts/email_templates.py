@@ -1,5 +1,7 @@
 """Templates d'emails pour les différentes catégories d'adhérents."""
 
+from src.templates import signature
+
 EMAIL_TEMPLATES = {
     "Adherent 2025": {
         "subject": "Renouvellement adhésion 2026 - La Coop des Communs",
@@ -862,3 +864,8 @@ coopdescommuns.org
 """
     }
 }
+
+# La signature porte des données personnelles : elle vient de l'environnement, pas
+# du code. Substituée ici, une fois, pour ne pas risquer d'oublier un gabarit — et
+# avant tout .format(), qui trébucherait sur d'éventuelles accolades.
+EMAIL_TEMPLATES = signature.appliquer_dict(EMAIL_TEMPLATES)

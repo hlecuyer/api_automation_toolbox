@@ -26,7 +26,7 @@
                 "name": "membres"
             },
             "email": {
-                "from": "@@SIG_EMAIL@@",
+                "from": "expediteur@votre-domaine.org",
                 "subject": "Bienvenue à La Coop des Communs !",
                 "send_confirmation": false
             }
