@@ -6,6 +6,15 @@ from urllib.parse import quote
 import requests
 
 
+def _escape_formula_value(value: str) -> str:
+    """Échappe une valeur destinée à une chaîne littérale de formule Airtable.
+
+    Sans ça, une apostrophe dans la valeur termine la chaîne et le reste de
+    l'adresse est interprété comme de la syntaxe de formule.
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 class AirtableClient:
     """Client for interacting with Airtable API."""
 
@@ -71,10 +80,21 @@ class AirtableClient:
             )
             return None
             
+        if not email:
+            return None
+
         try:
             # Use filterByFormula to search by email
             # Note: Use single braces {E-mail} in formula, not doubled
-            formula = "{E-mail}='" + email + "'"
+            #
+            # LOWER() des deux côtés : Airtable compare les chaînes en distinguant
+            # la casse. `{E-mail}='Jean.Dupont@x.fr'` ne retrouvait donc pas un
+            # enregistrement stocké en `jean.dupont@x.fr`, et upsert_record créait
+            # un doublon au lieu de mettre à jour le contact existant.
+            #
+            # La valeur est échappée : une apostrophe dans une adresse (valide,
+            # `o'brien@x.fr`) fermait la chaîne littérale et cassait la requête.
+            formula = "LOWER({E-mail})='" + _escape_formula_value(email.lower()) + "'"
             
             params = {
                 "filterByFormula": formula,

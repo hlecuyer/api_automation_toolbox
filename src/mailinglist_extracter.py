@@ -18,6 +18,15 @@ REQUIRED_FIELDS = [
 ]
 
 
+def normaliser_email(email):
+    """Forme canonique d'une adresse, pour comparaison uniquement.
+
+    Ne sert jamais à écrire : les valeurs transmises à OVH restent celles reçues
+    d'Airtable ou d'OVH, telles quelles.
+    """
+    return email.strip().lower() if isinstance(email, str) else email
+
+
 class CheckOvhMailinglist:
     def __init__(self, config_path):
         self.conf_path = config_path
@@ -219,6 +228,33 @@ class CheckOvhMailinglist:
             )
         # print(json.dumps(data, indent=4))
 
+    def ReconcileSubscribers(
+        self, mailing_list, airtable_subscribers, ovh_subscribers, label=""
+    ):
+        """Aligne une liste de diffusion OVH sur Airtable, hors casse.
+
+        Airtable et OVH ne s'accordent pas toujours sur la casse d'une même
+        adresse : `Jean.Dupont@…` d'un côté, `jean.dupont@…` de l'autre. Comparées
+        littéralement, chacune paraît absente de l'autre source : l'abonné est
+        supprimé puis réajouté, et cela recommence à chaque passage du cron, tous
+        les jours.
+
+        La comparaison se fait donc sur la forme normalisée, les appels OVH sur la
+        valeur d'origine.
+        """
+        connus_airtable = {normaliser_email(e) for e in airtable_subscribers}
+        connus_ovh = {normaliser_email(e) for e in ovh_subscribers}
+
+        for email in ovh_subscribers:
+            if normaliser_email(email) not in connus_airtable:
+                print("delete " + email + (" from " + label if label else ""))
+                self.DeleteOvhMailinglistSubscriber(mailing_list, email)
+
+        for email in airtable_subscribers:
+            if normaliser_email(email) not in connus_ovh:
+                print("add " + email + (" in " + label if label else ""))
+                self.AddOvhMailingListSubscriber(mailing_list, email)
+
     def SyncMailingList(self):
 
         ovh_subscribers = []
@@ -234,15 +270,7 @@ class CheckOvhMailinglist:
         print(json.dumps(ovh_subscribers, indent=4))
         print(json.dumps(airtable_subscribers, indent=4))
 
-        for email in ovh_subscribers:
-            if not any(d == email for d in airtable_subscribers):
-                print("delete " + email)
-                self.DeleteOvhMailinglistSubscriber(mailing_list, email)
-
-        for email in airtable_subscribers:
-            if email not in ovh_subscribers:
-                print("add " + email)
-                self.AddOvhMailingListSubscriber(mailing_list, email)
+        self.ReconcileSubscribers(mailing_list, airtable_subscribers, ovh_subscribers)
 
     def AutoSyncMailingList(self):
 
@@ -285,16 +313,9 @@ class CheckOvhMailinglist:
                 msg = "The mailing list {} does not exists".format(mailing_list)
                 syslog.syslog(syslog.LOG_ERR, msg)
                 print("ERROR: " + msg, file=sys.stderr)
-            for email in ovh_subscribers:
-                if not any(d == email for d in airtable_subscribers):
-                    print("delete " + email + " from " + item)
-                    self.DeleteOvhMailinglistSubscriber(mailing_list, email)
-            # print("Add to " + item + " :")
-            for email in airtable_subscribers:
-                if email not in ovh_subscribers:
-                    # continue
-                    print("add " + email + " in " + item)
-                    self.AddOvhMailingListSubscriber(mailing_list, email)
+            self.ReconcileSubscribers(
+                mailing_list, airtable_subscribers, ovh_subscribers, label=item
+            )
         # print(json.dumps(ovh_subscribers, indent=4))
         # print(json.dumps(airtable_subscribers, indent=4))
 

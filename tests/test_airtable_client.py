@@ -144,9 +144,15 @@ class TestAirtableClientFindRecord:
         assert record["id"] == "rec123"
         assert record["fields"]["Email"] == "test@example.com"
         
-        # Verify the filter formula was used (with E-mail field name)
+        # Verify the filter formula was used (with E-mail field name).
+        # LOWER() des deux côtés depuis le correctif « casse des mails » : sans lui,
+        # une adresse stockée avec une majuscule n'était pas retrouvée et l'upsert
+        # créait un doublon. Cas de bord couverts dans tests/test_casse_des_mails.py.
         call_kwargs = mock_get.call_args[1]
-        assert "{E-mail}='test@example.com'" in call_kwargs["params"]["filterByFormula"]
+        assert (
+            call_kwargs["params"]["filterByFormula"]
+            == "LOWER({E-mail})='test@example.com'"
+        )
 
     @patch('src.clients.airtable_client.requests.get')
     def test_find_record_by_email_not_found(self, mock_get, airtable_client):
