@@ -188,9 +188,13 @@ def render(first_name: str) -> tuple[str, str]:
         (body_text, body_html) tuple with `{first_name}` substituted.
     """
     safe_name = (first_name or "").strip() or "à toi"
-    # La signature est substituée avant le .format() : elle peut contenir n'importe
-    # quel caractère, y compris des accolades, sans faire échouer le rendu.
+    # La signature est substituée APRÈS le `.format()`, et non avant : dans l'autre
+    # ordre, une accolade dans une valeur de signature (un nom entre parenthèses
+    # typographiques, une fonction entre crochets) est vue par `.format()` comme un
+    # champ à remplacer et lève `KeyError` — le mail de bienvenue ne part pas et
+    # l'adhésion échoue. Les sentinelles ne contiennent pas d'accolade, elles
+    # traversent donc `.format()` intactes.
     return (
-        signature.appliquer(BODY_TEXT).format(first_name=safe_name),
-        signature.appliquer(BODY_HTML).format(first_name=safe_name),
+        signature.appliquer(BODY_TEXT.format(first_name=safe_name)),
+        signature.appliquer(BODY_HTML.format(first_name=safe_name)),
     )

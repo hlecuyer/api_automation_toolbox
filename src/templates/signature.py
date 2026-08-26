@@ -5,10 +5,13 @@ Les écrire en dur, c'est publier la vie privée d'un tiers dans un dépôt publ
 c'est irrattrapable une fois poussé. Les valeurs vivent donc dans l'environnement
 (`.env`, gitignoré ; en production le `.env` généré par Ansible).
 
-Les gabarits portent des sentinelles littérales, substituées au chargement du module,
-avant tout `.format()`. Deux raisons de ne pas utiliser des placeholders `{sig_*}` :
-`.format()` obligerait chaque appelant à fournir ces clés, et il trébucherait sur les
-accolades d'un éventuel CSS. `str.replace` ne fait ni l'un ni l'autre.
+Les gabarits portent des sentinelles littérales, substituées au rendu. Deux raisons de
+ne pas utiliser des placeholders `{sig_*}` : `.format()` obligerait chaque appelant à
+fournir ces clés, et il trébucherait sur les accolades d'un éventuel CSS. `str.replace`
+ne fait ni l'un ni l'autre.
+
+L'ordre compte : la substitution vient APRÈS le `.format()` de l'appelant, sans quoi une
+accolade dans une valeur de signature lèverait `KeyError`. Voir `welcome_email.render`.
 """
 
 import os
