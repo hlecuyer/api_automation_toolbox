@@ -99,17 +99,46 @@ def main() -> int:
         for valeur, nombre in sorted(variantes, key=lambda v: -v[1]):
             print(f"        {valeur!r} : {nombre}")
 
-    doublons = {c: v for c, v in familles.items() if len(v) > 1}
     print()
+    doublons = {c: v for c, v in familles.items() if len(v) > 1}
     if doublons:
         touchees = sum(n for v in doublons.values() for _, n in v)
         print(
-            f"⚠️  {len(doublons)} forme(s) écrite(s) de plusieurs façons, "
-            f"{touchees} fiche(s) concernée(s)."
+            f"⚠️  {len(doublons)} forme(s) écrite(s) de plusieurs façons "
+            f"(casse, accent ou espace), {touchees} fiche(s) concernée(s)."
         )
-        print("   C'est ce que le référentiel `normalized_fields` doit ramener sur une valeur.")
+
+    espaces = [v for v in occurrences if v != v.strip()]
+    if espaces:
+        print(
+            f"⚠️  {len(espaces)} valeur(s) avec un espace en trop : "
+            + ", ".join(repr(v) for v in espaces)
+        )
+        print("   Un filtre Airtable en correspondance exacte les rate.")
+
+    # Ce que ce script ne peut PAS trancher, et qu'il ne faut pas laisser croire
+    # résolu : `H` et `Masculin` sont deux formes canoniques distinctes et
+    # pourtant la même réponse. Aucun regroupement mécanique ne reconnaît des
+    # synonymes. Annoncer « rien à normaliser » parce que chaque forme n'a qu'une
+    # écriture serait un faux négatif sur exactement le bug qu'on traque.
+    if len(familles) > 1:
+        print(
+            f"❓ {len(familles)} formes distinctes sur ce champ. Si certaines sont des "
+            "synonymes\n"
+            "   (`H` et `Masculin`, `Payé 2025` et `Payé 2026` non), c'est une décision "
+            "humaine :\n"
+            "   le script ne reconnaît que les variantes d'écriture, jamais le sens."
+        )
     else:
-        print("✅ Chaque forme n'a qu'une écriture. Rien à normaliser sur ce champ.")
+        print("✅ Une seule forme sur ce champ.")
+
+    total = len(records)
+    if total and vides / total > 0.5:
+        print(
+            f"\n📉 {vides} fiche(s) sur {total} sans valeur ({vides * 100 // total} %). "
+            "Un champ majoritairement vide\n"
+            "   ne porte pas de statistique fiable : à verser au débat sur son usage."
+        )
 
     return 0
 
