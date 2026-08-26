@@ -2,8 +2,23 @@
 import sys
 import syslog
 from typing import Dict, List, Optional
+import unicodedata
 from urllib.parse import quote
 import requests
+
+
+def _cle_normalisee(valeur) -> str:
+    """Clé de rapprochement d'une valeur de champ : sans casse, sans accent, sans espaces.
+
+    Sert uniquement à reconnaître une variante (`F`, `féminin`, `Feminin`). La
+    valeur écrite dans Airtable est toujours celle du référentiel, jamais celle-ci.
+    """
+    if not isinstance(valeur, str):
+        return ""
+    sans_accent = "".join(
+        c for c in unicodedata.normalize("NFD", valeur) if unicodedata.category(c) != "Mn"
+    )
+    return sans_accent.strip().lower()
 
 
 def _escape_formula_value(value: str) -> str:
@@ -25,6 +40,7 @@ class AirtableClient:
         table_name: str = "Annuaire",
         linked_records: Optional[Dict[str, Dict]] = None,
         computed_fields: Optional[Dict[str, Dict]] = None,
+        normalized_fields: Optional[Dict[str, Dict]] = None,
     ):
         """
         Initialize Airtable client.
@@ -45,6 +61,16 @@ class AirtableClient:
                    payload (e.g. HelloAsso didn't say "Oui" to "first adhésion?"). On UPDATE,
                    only fills it if both the payload and the existing record are missing it,
                    so historical values are preserved.
+            normalized_fields: Optional mapping of field name → {values, on_unknown,
+                fallback_value}. Ramène les variantes d'un champ à choix fermé sur une
+                valeur unique : `M`, `masculin` et `Masculin` désignent la même chose, mais
+                Airtable les garde comme trois options distinctes et la base devient
+                infiltrable. `values` associe une variante à la valeur retenue ; la
+                reconnaissance ignore la casse et les accents.
+                `on_unknown` vaut "keep" (défaut, la valeur inconnue passe telle quelle et
+                un avertissement part dans syslog) ou "fallback" (elle est remplacée par
+                `fallback_value`). Le défaut ne perd jamais la donnée d'un adhérent :
+                une valeur inattendue est un signal, pas un déchet.
         """
         self.api_key = api_key
         self.base_id = base_id
@@ -58,6 +84,7 @@ class AirtableClient:
         }
         self.linked_records = linked_records or {}
         self.computed_fields = computed_fields or {}
+        self.normalized_fields = normalized_fields or {}
         # In-process cache to avoid re-querying linked tables for the same name
         # Key: (linked_table, match_field, value) → record_id
         self._linked_record_cache: Dict[tuple, str] = {}
@@ -383,6 +410,46 @@ class AirtableClient:
 
             fields[field_name] = ids
 
+    def _apply_normalized_fields(self, fields: Dict) -> None:
+        """Ramène les champs à choix fermé sur leur valeur de référence.
+
+        HelloAsso a livré au fil du temps `M`/`F` et `masculin`/`féminin` pour le
+        même champ Genre, selon la version du formulaire. Airtable les conserve
+        comme des options distinctes : un filtre sur « féminin » rate les fiches
+        en « F ».
+
+        Mute `fields` sur place.
+        """
+        for field_name, regle in self.normalized_fields.items():
+            if field_name not in fields:
+                continue
+
+            valeur = fields[field_name]
+            referentiel = {
+                _cle_normalisee(variante): retenue
+                for variante, retenue in (regle.get("values") or {}).items()
+            }
+            cle = _cle_normalisee(valeur)
+
+            if cle in referentiel:
+                fields[field_name] = referentiel[cle]
+            elif cle == "":
+                continue
+            elif regle.get("on_unknown") == "fallback":
+                syslog.syslog(
+                    syslog.LOG_WARNING,
+                    f"Valeur inattendue pour {field_name} : {valeur!r} — "
+                    f"remplacée par {regle.get('fallback_value')!r}",
+                )
+                fields[field_name] = regle.get("fallback_value")
+            else:
+                syslog.syslog(
+                    syslog.LOG_WARNING,
+                    f"Valeur inattendue pour {field_name} : {valeur!r} — "
+                    "laissée telle quelle. Ajouter la variante au référentiel "
+                    "si elle est légitime.",
+                )
+
     def _apply_computed_fields(
         self,
         fields: Dict,
@@ -460,6 +527,11 @@ class AirtableClient:
             # Ensure email is in fields with the correct Airtable field name
             if "E-mail" not in fields:
                 fields["E-mail"] = email
+
+            # Avant tout le reste : les valeurs qui arrivent doivent être celles du
+            # référentiel, sinon les règles suivantes raisonnent sur des variantes.
+            if self.normalized_fields:
+                self._apply_normalized_fields(fields)
 
             # Try to find existing record (also used for linked-record merge)
             existing_record = self.find_record_by_email(email)
