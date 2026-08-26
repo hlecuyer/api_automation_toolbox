@@ -44,10 +44,16 @@ def main() -> int:
         "--seuil", type=int, default=0,
         help="ne montrer que les valeurs vues au moins N fois",
     )
+    parser.add_argument(
+        "--base",
+        help="identifiant de base Airtable (défaut : AIRTABLE_BASE_ID du .env). "
+             "Le .env porte plusieurs bases et le code n'en lit qu'une : passer "
+             "l'identifiant explicitement évite d'inventorier la mauvaise.",
+    )
     args = parser.parse_args()
 
     api_key = os.getenv("AIRTABLE_API_KEY")
-    base_id = os.getenv("AIRTABLE_BASE_ID")
+    base_id = args.base or os.getenv("AIRTABLE_BASE_ID")
     if not api_key or not base_id:
         print(
             "AIRTABLE_API_KEY ou AIRTABLE_BASE_ID absent de l'environnement.\n"
@@ -58,7 +64,7 @@ def main() -> int:
 
     client = AirtableClient(api_key=api_key, base_id=base_id, table_name=args.table)
 
-    print(f"Balayage de « {args.table} »…")
+    print(f"Balayage de « {args.table} » dans la base {base_id}…")
     records = client.list_records()
     print(f"{len(records)} enregistrement(s).\n")
 
