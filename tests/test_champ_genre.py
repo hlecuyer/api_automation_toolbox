@@ -158,3 +158,49 @@ def test_cle_normalisee(entree, attendu):
 def test_cle_normalisee_tolere_autre_chose_qu_une_chaine():
     assert _cle_normalisee(None) == ""
     assert _cle_normalisee(42) == ""
+
+
+class TestLibellesRognes:
+    """Une espace en trop dans un libellé ne doit plus faire perdre la réponse.
+
+    Le 27/08/2026, le formulaire de production posait la question de consentement
+    avec une espace finale et le formulaire de test, créé par duplication, sans
+    elle. Deux formulaires censés être identiques, deux comportements : un bac à
+    sable qui ne rejoue pas la production ne prouve rien.
+    """
+
+    @staticmethod
+    def _item(libelle, reponse):
+        return {
+            "payer": {"email": "a@example.org"},
+            "user": {"firstName": "A", "lastName": "B"},
+            "order": {"date": "2026-08-27T10:00:00"},
+            "state": "Processed",
+            "customFields": [{"name": libelle, "answer": reponse}],
+        }
+
+    @pytest.mark.parametrize("libelle", ["Genre", " Genre", "Genre ", "  Genre  "])
+    def test_la_reponse_est_lue_quelle_que_soit_l_espace(self, libelle):
+        from src.models.user_subscription import UserSubscription
+
+        sub = UserSubscription.from_hello_asso_item(
+            self._item(libelle, "Masculin"), cotisation="Payé 2026", groupe="G")
+        assert sub.to_airtable_payload()["Genre"] == "Masculin"
+
+    def test_le_champ_de_configuration_aussi(self):
+        """first_sub_field vient de l'inventaire, recopié à la main lui aussi."""
+        from src.models.user_subscription import UserSubscription
+
+        sub = UserSubscription.from_hello_asso_item(
+            self._item("Première adhésion ?", "Oui"),
+            cotisation="Payé 2026", groupe="G",
+            first_sub_field="  Première adhésion ? ")
+        assert sub.custom_fields["Première adhésion ?"] == "2026"
+
+    def test_les_valeurs_ne_sont_pas_rognees(self):
+        """Le rognage sert à rapprocher deux libellés, jamais à écrire."""
+        from src.models.user_subscription import UserSubscription
+
+        sub = UserSubscription.from_hello_asso_item(
+            self._item("Structure", " Coop du Pont "), cotisation="c", groupe="G")
+        assert sub.to_airtable_payload()["Structure(s)"] == " Coop du Pont "

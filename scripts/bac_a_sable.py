@@ -461,12 +461,17 @@ def formulaire(client, titre_reference, titre_test):
     il a fait perdre le consentement de 84 adhérents pendant toute l'année 2026.
     """
     from src.models.user_subscription import CHAMPS_HELLOASSO_VERS_AIRTABLE as contrat
+    from src.models.user_subscription import _cle
 
     ecarts = 0
     details_ref, ref = _questions(client, titre_reference)
     print("référence : « %s »  (%s/%s), %d question(s)"
           % (titre_reference, details_ref["formType"], details_ref["formSlug"], len(ref)))
     labels_ref = {l for l, _ in ref}
+    # Le code rogne les libellés à l'entrée : une espace en trop ne change plus
+    # rien. La comparaison doit donc l'ignorer aussi, sinon elle signalerait un
+    # défaut là où le code n'en a plus.
+    cles_ref = {_cle(l) for l in labels_ref}
 
     labels_test = None
     if titre_test:
@@ -474,12 +479,13 @@ def formulaire(client, titre_reference, titre_test):
         print("test      : « %s »  (%s/%s), %d question(s)"
               % (titre_test, details_test["formType"], details_test["formSlug"], len(test)))
         labels_test = {l for l, _ in test}
+        cles_test = {_cle(l) for l in labels_test}
     print()
 
     print("Contrat de mappage — les %d libellés que le code sait lire :" % len(contrat))
     for libelle, colonne in contrat.items():
-        dans_ref = libelle in labels_ref
-        dans_test = labels_test is None or libelle in labels_test
+        dans_ref = _cle(libelle) in cles_ref
+        dans_test = labels_test is None or _cle(libelle) in cles_test
         if dans_ref and dans_test:
             print("   ✅ %-30s ← %r" % (colonne, libelle))
             continue
@@ -493,8 +499,8 @@ def formulaire(client, titre_reference, titre_test):
         print("      absent %s" % " et ".join(manque))
         if not dans_ref:
             proches = [l for l in labels_ref
-                       if l.strip().lower().startswith(libelle.strip().lower()[:12])
-                       or libelle.strip().lower()[:12] in l.strip().lower()]
+                       if l.strip().lower().startswith(_cle(libelle).lower()[:12])
+                       or _cle(libelle).lower()[:12] in l.strip().lower()]
             for p in proches:
                 print("      candidat publié : %r" % p)
             if not proches:
@@ -503,10 +509,21 @@ def formulaire(client, titre_reference, titre_test):
 
     if labels_test is not None:
         print()
+        for cle in sorted(cles_ref - cles_test):
+            print("   ⚠  posée en référence, absente du test : %r"
+                  % next(l for l in labels_ref if _cle(l) == cle))
+        for cle in sorted(cles_test - cles_ref):
+            print("   ·  posée dans le test seulement : %r"
+                  % next(l for l in labels_test if _cle(l) == cle))
+        # Différences d'espaces seules : sans effet depuis que le code rogne, mais
+        # dites quand même — c'est la trace d'une recopie, et la prochaine pourrait
+        # porter sur autre chose qu'une espace.
         for libelle in sorted(labels_ref - labels_test):
-            print("   ⚠  posée en référence, absente du test : %r" % libelle)
-        for libelle in sorted(labels_test - labels_ref):
-            print("   ·  posée dans le test seulement : %r" % libelle)
+            jumeau = next((l for l in labels_test if _cle(l) == _cle(libelle)), None)
+            if jumeau is not None:
+                print("   ·  même question, espaces différentes (sans effet) :")
+                print("        référence %r" % libelle)
+                print("        test      %r" % jumeau)
 
     print()
     print("→ %d écart(s) sur le contrat" % ecarts if ecarts

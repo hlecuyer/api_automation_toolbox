@@ -19,6 +19,15 @@ from typing import Dict, Optional
 # Sorti au niveau module pour être inspectable : `scripts/bac_a_sable.py
 # formulaire` compare ces clés aux questions réellement publiées et signale
 # celles qui ne rencontrent rien.
+def _cle(libelle):
+    """Forme d'un libellé de question retenue pour la comparaison.
+
+    Ne sert qu'à rapprocher deux libellés, jamais à écrire : ce qui part vers
+    Airtable reste la valeur reçue.
+    """
+    return libelle.strip() if isinstance(libelle, str) else libelle
+
+
 CHAMPS_HELLOASSO_VERS_AIRTABLE = {
     "Genre": "Genre",
     "Structure": "Structure(s)",
@@ -69,8 +78,8 @@ class UserSubscription:
         
         # Ajouter uniquement les custom fields qui existent dans le mapping
         for helloasso_field, airtable_field in custom_field_mapping.items():
-            if helloasso_field in self.custom_fields:
-                value = self.custom_fields[helloasso_field]
+            if _cle(helloasso_field) in self.custom_fields:
+                value = self.custom_fields[_cle(helloasso_field)]
                 # N'ajouter que si la valeur n'est pas vide
                 if value:
                     payload[airtable_field] = value
@@ -101,16 +110,26 @@ class UserSubscription:
         Returns:
             UserSubscription instance
         """
-        # Extract custom fields
+        # Les libellés sont rognés à l'entrée, une fois, pour que plus rien en aval
+        # n'ait à y penser.
+        #
+        # Un libellé de question est saisi à la main dans HelloAsso et recopié à la
+        # main dans la configuration : une espace en trop d'un côté suffit à ce que
+        # la réponse ne soit jamais lue, sans erreur ni trace. Le 27/08/2026, le
+        # formulaire de production posait « J'accepte les règles de confidentialité
+        # … » avec une espace finale, et le formulaire de test créé par duplication
+        # posait le même libellé sans elle : deux formulaires censés être
+        # identiques, deux comportements différents. Un bac à sable qui ne rejoue
+        # pas la production ne prouve rien.
         custom_fields = {}
         for field_data in item.get("customFields", []):
-            custom_fields[field_data["name"]] = field_data["answer"]
+            custom_fields[_cle(field_data["name"])] = field_data["answer"]
         
         # Apply default fields
         if default_fields:
             for key, value in default_fields.items():
-                if key not in custom_fields:
-                    custom_fields[key] = value
+                if _cle(key) not in custom_fields:
+                    custom_fields[_cle(key)] = value
         
         # Parse subscription date
         date_str = item["order"]["date"].split("+")[0].split(".")[0]
@@ -120,15 +139,15 @@ class UserSubscription:
         # "Oui" → store the current year (Airtable receives "2026").
         # Anything else (e.g. "Non", empty default) → drop it so the upsert layer
         # falls back to the configured first_year_subscription label.
-        if first_sub_field and first_sub_field in custom_fields:
-            if custom_fields[first_sub_field] == "Oui":
-                custom_fields[first_sub_field] = subscription_date.strftime("%Y")
+        if first_sub_field and _cle(first_sub_field) in custom_fields:
+            if custom_fields[_cle(first_sub_field)] == "Oui":
+                custom_fields[_cle(first_sub_field)] = subscription_date.strftime("%Y")
             else:
-                del custom_fields[first_sub_field]
+                del custom_fields[_cle(first_sub_field)]
         
         # Handle name field uppercase
-        if name_field and name_field in custom_fields:
-            custom_fields[name_field] = custom_fields[name_field].upper()
+        if name_field and _cle(name_field) in custom_fields:
+            custom_fields[_cle(name_field)] = custom_fields[_cle(name_field)].upper()
         
         return cls(
             email=item["payer"]["email"],
