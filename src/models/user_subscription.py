@@ -4,6 +4,36 @@ from datetime import datetime
 from typing import Dict, Optional
 
 
+# Mapping explicite des questions HelloAsso → colonnes de la table Annuaire.
+#
+# Clés = **libellés exacts** des questions, tels que HelloAsso les renvoie. Un
+# libellé qui diffère d'un caractère ne lève rien : la réponse est simplement
+# ignorée, et la colonne reste vide pour toujours.
+#
+# Ce n'est pas théorique. Le 27/08/2026, la clé « Règles de Confidentialité » ne
+# correspondait à aucune question du formulaire — la vraie s'appelle
+# « J'accepte les règles de confidentialité de La Coop des Communs… », espace
+# finale comprise. Résultat : le consentement de 84 adhérents 2026 n'a jamais
+# été enregistré, sans le moindre message d'erreur.
+#
+# Sorti au niveau module pour être inspectable : `scripts/bac_a_sable.py
+# formulaire` compare ces clés aux questions réellement publiées et signale
+# celles qui ne rencontrent rien.
+CHAMPS_HELLOASSO_VERS_AIRTABLE = {
+    "Genre": "Genre",
+    "Structure": "Structure(s)",
+    # "Date de naissance": "date de naissance",  # Format incompatible, à convertir
+    "Fonction au sein de votre structure": "Fonction (structure)",
+    "Intérêts (mot-clés)": "Intérêts",
+    "Localisation (code postal)": "code postal",
+    "Je souhaite que mon Nom et Prénom soient partagés sur le site web de l'association dans la liste des adhérent·es": "Visible sur le site",
+    "Souhaitez-vous partager les informations précédentes avec les autres adhérent·es de la Coop des Communs ? Pour information, les champs suivants seront uniquement accessibles par l'équipe de gestion de l'association et les prestataires missionnés.": "Partage de donnée autorisé",
+    "Si oui, pouvez-vous nous indiquer deux personnes connues au sein de l'association ?": "2 personnes connues",
+    "Est-ce votre première adhésion à la coop des communs ?": "Année de première adhésion",
+    "Règles de Confidentialité": "Règles de Confidentialité",
+}
+
+
 @dataclass
 class UserSubscription:
     """Represents a user subscription from HelloAsso."""
@@ -35,22 +65,7 @@ class UserSubscription:
             "Groupe(s)": self.groupe,
         }
         
-        # Mapping explicite des custom fields HelloAsso → Airtable.
-        # Clés = libellés exacts des questions HelloAsso (formulaire "Adhésion année 2026").
-        # Valeurs = noms de colonnes Airtable dans la table Annuaire.
-        custom_field_mapping = {
-            "Genre": "Genre",
-            "Structure": "Structure(s)",
-            # "Date de naissance": "date de naissance",  # Format incompatible, à convertir
-            "Fonction au sein de votre structure": "Fonction (structure)",
-            "Intérêts (mot-clés)": "Intérêts",
-            "Localisation (code postal)": "code postal",
-            "Je souhaite que mon Nom et Prénom soient partagés sur le site web de l'association dans la liste des adhérent·es": "Visible sur le site",
-            "Souhaitez-vous partager les informations précédentes avec les autres adhérent·es de la Coop des Communs ? Pour information, les champs suivants seront uniquement accessibles par l'équipe de gestion de l'association et les prestataires missionnés.": "Partage de donnée autorisé",
-            "Si oui, pouvez-vous nous indiquer deux personnes connues au sein de l'association ?": "2 personnes connues",
-            "Est-ce votre première adhésion à la coop des communs ?": "Année de première adhésion",
-            "Règles de Confidentialité": "Règles de Confidentialité",
-        }
+        custom_field_mapping = CHAMPS_HELLOASSO_VERS_AIRTABLE
         
         # Ajouter uniquement les custom fields qui existent dans le mapping
         for helloasso_field, airtable_field in custom_field_mapping.items():

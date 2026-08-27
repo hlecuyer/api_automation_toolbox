@@ -19,15 +19,17 @@ Ce script rend ces deux propriétés vérifiables à la demande, donc falsifiabl
 
 Trois sous-commandes :
 
-    comparer   dérive entre la base de référence (production) et le bac à sable
-    verifier   aucune adresse du bac à sable ne peut atteindre une vraie personne
-    peupler    génère des adhérents fictifs, des groupes et des structures
+    comparer    dérive entre la base de référence (production) et le bac à sable
+    verifier    aucune adresse du bac à sable ne peut atteindre une vraie personne
+    peupler     génère des adhérents fictifs, des groupes et des structures
+    formulaire  les questions d'un formulaire HelloAsso rencontrent-elles le code
 
 Usage :
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py comparer --base appXXXX
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py verifier --base appXXXX
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py peupler  --base appXXXX --nombre 40
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py peupler  --base appXXXX --appliquer
+    PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py formulaire --formulaire "Bac à sable — adhésion"
 
 Le bac à sable se désigne par `--base`, ou par `AIRTABLE_BASE_ID_BAC_A_SABLE`
 dans le `.env`. La référence est `AIRTABLE_BASE_ID_PROD`.
@@ -313,10 +315,24 @@ STRUCTURES = [
     "Collectif Aire Ouverte", "Institut des Usages", "Régie de Quartier Bellevue",
 ]
 
+# `Nom` et `Label` ne servent pas à la même chose, et c'est ce qui protège la
+# production ici.
+#
+# `hello_asso_sync` rattache l'adhérent au groupe par son **nom** : le premier
+# doit donc porter le nom réel, sinon le rattachement ne se rejoue pas.
+# `mailinglist_extracter`, lui, prend le **label** comme nom de liste OVH et
+# aligne cette liste sur Airtable — en supprimant tout abonné absent d'Airtable.
+#
+# Un label de bac à sable qui coïnciderait avec une vraie liste OVH ferait donc
+# vider cette liste au profit d'adresses fictives. Le préfixe rend la collision
+# impossible par construction, au lieu de la rendre improbable.
+#
+# Label vide = groupe ignoré par l'extracteur : les deux GT de décor n'ont pas
+# de liste OVH et n'en réclameront pas.
 GROUPES = [
-    "Adhérent·es la Coop des Communs",  # nom réel : le code le cherche par nom
-    "GT Bac à sable",
-    "GT Répétition",
+    {"Nom": "Adhérent·es la Coop des Communs", "Label": "bac-a-sable"},
+    {"Nom": "GT Bac à sable"},
+    {"Nom": "GT Répétition"},
 ]
 
 
@@ -380,6 +396,8 @@ def peupler(at, cible, nombre, cotisation, appliquer, graine):
     print("bac à sable : %s" % cible)
     print("à créer : %d groupe(s), %d structure(s), %d adhérent(s) « %s »"
           % (len(GROUPES), len(STRUCTURES), len(adherents), cotisation))
+    print("liste OVH visée par l'extracteur : %s (label du premier groupe)"
+          % GROUPES[0]["Label"])
     print("adresses en @example.org — domaine réservé RFC 2606, sans MX")
     print()
 
@@ -393,8 +411,7 @@ def peupler(at, cible, nombre, cotisation, appliquer, graine):
         print("Simulation. Rien n'est écrit. Relancer avec --appliquer.")
         return 0
 
-    groupes = at.creer(cible, schema["Liste des groupes"]["id"],
-                       [{"Nom": g, "Label": g} for g in GROUPES])
+    groupes = at.creer(cible, schema["Liste des groupes"]["id"], [dict(g) for g in GROUPES])
     print("✅ %d groupe(s)" % len(groupes))
 
     structures = at.creer(cible, schema["Structures"]["id"],
@@ -417,21 +434,143 @@ def peupler(at, cible, nombre, cotisation, appliquer, graine):
 
 
 # --------------------------------------------------------------------------
+# formulaire — les questions rencontrent-elles le code
+# --------------------------------------------------------------------------
+
+def _questions(client, titre):
+    """Libellés des questions d'un formulaire, dans l'ordre où il les pose."""
+    details = client.get_form_details(titre)
+    if not details:
+        sys.exit("Formulaire « %s » introuvable dans l'organisation." % titre)
+    public = client.get_public_form(details["formType"], details["formSlug"])
+    labels, vus = [], set()
+    for tarif in public.get("tiers", []):
+        for champ in tarif.get("customFields", []):
+            if champ["label"] not in vus:
+                vus.add(champ["label"])
+                labels.append((champ["label"], champ.get("type", "")))
+    return details, labels
+
+
+def formulaire(client, titre_reference, titre_test):
+    """Vérifie qu'un formulaire pose les questions que le code sait lire.
+
+    Un libellé qui diffère d'un caractère ne lève rien : la réponse est ignorée
+    et la colonne Airtable reste vide pour toujours. C'est le mode de défaillance
+    le plus coûteux de cette chaîne, parce qu'il est parfaitement silencieux —
+    il a fait perdre le consentement de 84 adhérents pendant toute l'année 2026.
+    """
+    from src.models.user_subscription import CHAMPS_HELLOASSO_VERS_AIRTABLE as contrat
+
+    ecarts = 0
+    details_ref, ref = _questions(client, titre_reference)
+    print("référence : « %s »  (%s/%s), %d question(s)"
+          % (titre_reference, details_ref["formType"], details_ref["formSlug"], len(ref)))
+    labels_ref = {l for l, _ in ref}
+
+    labels_test = None
+    if titre_test:
+        details_test, test = _questions(client, titre_test)
+        print("test      : « %s »  (%s/%s), %d question(s)"
+              % (titre_test, details_test["formType"], details_test["formSlug"], len(test)))
+        labels_test = {l for l, _ in test}
+    print()
+
+    print("Contrat de mappage — les %d libellés que le code sait lire :" % len(contrat))
+    for libelle, colonne in contrat.items():
+        dans_ref = libelle in labels_ref
+        dans_test = labels_test is None or libelle in labels_test
+        if dans_ref and dans_test:
+            print("   ✅ %-30s ← %r" % (colonne, libelle))
+            continue
+        ecarts += 1
+        manque = []
+        if not dans_ref:
+            manque.append("de la RÉFÉRENCE")
+        if not dans_test:
+            manque.append("du formulaire de TEST")
+        print("   ❌ %-30s ← %r" % (colonne, libelle))
+        print("      absent %s" % " et ".join(manque))
+        if not dans_ref:
+            proches = [l for l in labels_ref
+                       if l.strip().lower().startswith(libelle.strip().lower()[:12])
+                       or libelle.strip().lower()[:12] in l.strip().lower()]
+            for p in proches:
+                print("      candidat publié : %r" % p)
+            if not proches:
+                print("      aucune question publiée n'y ressemble : la colonne « %s »"
+                      " ne sera jamais remplie depuis HelloAsso." % colonne)
+
+    if labels_test is not None:
+        print()
+        for libelle in sorted(labels_ref - labels_test):
+            print("   ⚠  posée en référence, absente du test : %r" % libelle)
+        for libelle in sorted(labels_test - labels_ref):
+            print("   ·  posée dans le test seulement : %r" % libelle)
+
+    print()
+    print("→ %d écart(s) sur le contrat" % ecarts if ecarts
+          else "→ le contrat de mappage est honoré de bout en bout")
+    return 1 if ecarts else 0
+
+
+# --------------------------------------------------------------------------
+
+def _formulaire_depuis_args(args):
+    """Monte le client HelloAsso depuis la configuration locale.
+
+    Ni l'organisation ni le titre du formulaire ne sont écrits en dur : ce dépôt
+    est public, et ces valeurs désignent un client.
+    """
+    from src.clients.hello_asso_client import HelloAssoClient
+
+    conf = {}
+    if os.path.exists(args.config):
+        import json
+        with open(args.config, encoding="utf-8") as f:
+            conf = json.load(f).get("conf", {}).get("helloAsso", {})
+
+    organisation = os.getenv("HELLOASSO_ORGANIZATION") or conf.get("organization_name")
+    reference = (args.formulaire_reference or os.getenv("HELLOASSO_FORM_REFERENCE")
+                 or conf.get("form_name"))
+    if not organisation or not reference:
+        sys.exit("Organisation ou formulaire de référence inconnus : les poser dans %s, "
+                 "ou via HELLOASSO_ORGANIZATION / HELLOASSO_FORM_REFERENCE." % args.config)
+    if not (os.getenv("HELLOASSO_CLIENT_ID") and os.getenv("HELLOASSO_CLIENT_SECRET")):
+        sys.exit("HELLOASSO_CLIENT_ID / HELLOASSO_CLIENT_SECRET absents du .env.")
+
+    client = HelloAssoClient(
+        api_url=os.getenv("HELLOASSO_API_URL") or conf.get("api_url", "https://api.helloasso.com"),
+        organization_name=organisation,
+        client_id=os.getenv("HELLOASSO_CLIENT_ID"),
+        client_secret=os.getenv("HELLOASSO_CLIENT_SECRET"),
+    )
+    return formulaire(client, reference, args.formulaire)
+
 
 def main():
     load_dotenv()
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("action", choices=["comparer", "verifier", "peupler"])
+    p.add_argument("action", choices=["comparer", "verifier", "peupler", "formulaire"])
     p.add_argument("--base", help="identifiant du bac à sable (défaut : AIRTABLE_BASE_ID_BAC_A_SABLE)")
     p.add_argument("--reference", help="base de référence (défaut : AIRTABLE_BASE_ID_PROD)")
     p.add_argument("--nombre", type=int, default=40, help="adhérents fictifs à créer (défaut 40)")
     p.add_argument("--cotisation", default="Payé 2026", help="valeur de Cotisation LCDC")
     p.add_argument("--graine", type=int, default=27082026, help="graine du tirage, pour un jeu reproductible")
     p.add_argument("--appliquer", action="store_true", help="écrire vraiment (défaut : simulation)")
+    p.add_argument("--formulaire", help="formulaire : titre du formulaire de test à vérifier")
+    p.add_argument("--formulaire-reference",
+                   help="formulaire : titre du formulaire de production (défaut : celui du "
+                        "config JSON, ou HELLOASSO_FORM_REFERENCE)")
+    p.add_argument("--config", default="config/hello-asso-automation-conf.json",
+                   help="formulaire : config d'où lire organisation et formulaire de référence")
     p.add_argument("--croiser-prod", action="store_true",
                    help="verifier : dire aussi combien d'adresses suspectes sont en production")
     args = p.parse_args()
+
+    if args.action == "formulaire":
+        return _formulaire_depuis_args(args)
 
     cible = args.base or os.getenv("AIRTABLE_BASE_ID_BAC_A_SABLE")
     reference = args.reference or os.getenv("AIRTABLE_BASE_ID_PROD")

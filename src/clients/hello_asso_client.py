@@ -61,6 +61,28 @@ class HelloAssoClient:
             )
             raise
     
+    def get_public_form(self, form_type: str, form_slug: str) -> Dict:
+        """Définition publique d'un formulaire : ses questions, sans ses commandes.
+
+        Utile là où `get_form_items` ne peut rien dire : un formulaire neuf n'a
+        aucune adhésion, donc aucun `customFields` observable. Cette route rend
+        les libellés dès la création, ce qui permet de vérifier un formulaire de
+        test avant le premier paiement.
+        """
+        url = "{}/v5/organizations/{}/forms/{}/{}/public".format(
+            self.api_url, self.organization_name, form_type, form_slug
+        )
+        try:
+            response = requests.get(url, headers=self._headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            syslog.syslog(
+                syslog.LOG_ERR,
+                "Failed to get public form {}/{}: {}".format(form_type, form_slug, e),
+            )
+            return {}
+
     def get_form_details(self, form_name: str) -> Dict:
         """
         Find form details using form name.

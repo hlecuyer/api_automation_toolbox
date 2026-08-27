@@ -186,4 +186,85 @@ class TestIdentitesFictives:
 
     def test_le_groupe_reel_est_le_premier(self):
         """Le code cherche ce groupe par son nom : le bac à sable doit le porter."""
-        assert bac.GROUPES[0] == "Adhérent·es la Coop des Communs"
+        assert bac.GROUPES[0]["Nom"] == "Adhérent·es la Coop des Communs"
+
+    def test_les_labels_sont_prefixes(self):
+        """Un label est un nom de liste OVH, et l'extracteur vide ce qu'il aligne.
+
+        Un label de bac à sable qui coïnciderait avec une vraie liste OVH ferait
+        supprimer ses abonnés réels au profit d'adresses fictives.
+        """
+        for groupe in bac.GROUPES:
+            if "Label" in groupe:
+                assert groupe["Label"].startswith("bac-a-sable")
+
+    def test_un_seul_groupe_reclame_une_liste_ovh(self):
+        """Label absent = groupe ignoré par l'extracteur, donc pas d'erreur à vide."""
+        assert sum(1 for g in bac.GROUPES if g.get("Label")) == 1
+
+
+class FauxClientHelloAsso:
+    """Sert des définitions de formulaire sans réseau."""
+
+    def __init__(self, formulaires):
+        self.formulaires = formulaires
+
+    def get_form_details(self, titre):
+        if titre not in self.formulaires:
+            return {}
+        return {"formType": "Membership", "formSlug": titre}
+
+    def get_public_form(self, form_type, form_slug):
+        return {"tiers": [{"customFields": [
+            {"label": l, "type": "TextInput"} for l in self.formulaires[form_slug]]}]}
+
+
+class TestContratDuFormulaire:
+    """Un libellé qui diffère d'un caractère ne lève rien : la réponse est ignorée."""
+
+    @pytest.fixture
+    def contrat(self, monkeypatch):
+        from src.models import user_subscription
+        monkeypatch.setattr(user_subscription, "CHAMPS_HELLOASSO_VERS_AIRTABLE",
+                            {"Genre": "Genre", "Consentement": "Règles"})
+
+    def lancer(self, contrat, formulaires, reference, test, capsys):
+        client = FauxClientHelloAsso(formulaires)
+        code = bac.formulaire(client, reference, test)
+        return code, capsys.readouterr().out
+
+    def test_contrat_honore(self, contrat, capsys):
+        f = {"prod": ["Genre", "Consentement"], "test": ["Genre", "Consentement"]}
+        code, sortie = self.lancer(contrat, f, "prod", "test", capsys)
+        assert code == 0
+        assert "honoré de bout en bout" in sortie
+
+    def test_libelle_absent_de_la_reference_est_signale(self, contrat, capsys):
+        """Le cas réel : le code attend un libellé que le formulaire ne pose pas."""
+        f = {"prod": ["Genre", "Consentement aux règles de confidentialité"]}
+        code, sortie = self.lancer(contrat, f, "prod", None, capsys)
+        assert code == 1
+        assert "absent de la RÉFÉRENCE" in sortie
+
+    def test_le_libelle_proche_est_proposé(self, contrat, capsys):
+        """Nommer le candidat évite d'avoir à le deviner dans l'interface."""
+        f = {"prod": ["Genre", "Consentement aux règles de confidentialité "]}
+        code, sortie = self.lancer(contrat, f, "prod", None, capsys)
+        assert "candidat publié" in sortie
+        assert repr("Consentement aux règles de confidentialité ") in sortie
+
+    def test_libelle_absent_du_formulaire_de_test(self, contrat, capsys):
+        f = {"prod": ["Genre", "Consentement"], "test": ["Genre"]}
+        code, sortie = self.lancer(contrat, f, "prod", "test", capsys)
+        assert code == 1
+        assert "du formulaire de TEST" in sortie
+
+    def test_question_en_trop_dans_le_test_est_seulement_notée(self, contrat, capsys):
+        f = {"prod": ["Genre", "Consentement"], "test": ["Genre", "Consentement", "Bonus"]}
+        code, sortie = self.lancer(contrat, f, "prod", "test", capsys)
+        assert code == 0
+        assert "posée dans le test seulement" in sortie
+
+    def test_formulaire_introuvable(self, contrat, capsys):
+        with pytest.raises(SystemExit):
+            self.lancer(contrat, {"prod": ["Genre"]}, "absent", None, capsys)
