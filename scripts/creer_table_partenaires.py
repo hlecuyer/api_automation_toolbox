@@ -321,11 +321,17 @@ def main():
 
     load_dotenv()
     base = os.getenv("AIRTABLE_BASE_ID_PROD")
-    token = os.getenv("AIRTABLE_API_KEY_PROD")
+    # Écrire le schéma est un besoin ponctuel. Plutôt que d'élargir les droits du
+    # jeton du cron de production — qui a accès à toutes les bases et vit dans le
+    # .env du serveur — on accepte ici un jeton dédié, à supprimer après usage.
+    token = os.getenv("AIRTABLE_TOKEN_SCHEMA") or os.getenv("AIRTABLE_API_KEY_PROD")
     if not base or not token:
         # Le .env local expose deux bases et la clé sans suffixe pointe vers la
         # mauvaise. On exige donc explicitement les variables _PROD.
-        sys.exit("AIRTABLE_BASE_ID_PROD / AIRTABLE_API_KEY_PROD absents du .env")
+        sys.exit("AIRTABLE_BASE_ID_PROD absent, ou aucun jeton "
+                 "(AIRTABLE_TOKEN_SCHEMA / AIRTABLE_API_KEY_PROD) dans le .env")
+    if os.getenv("AIRTABLE_TOKEN_SCHEMA"):
+        print("jeton : AIRTABLE_TOKEN_SCHEMA (dédié)")
 
     if args.spec:
         imprimer_spec()
