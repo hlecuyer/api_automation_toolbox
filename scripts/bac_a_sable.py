@@ -23,6 +23,7 @@ Trois sous-commandes :
     verifier    aucune adresse du bac à sable ne peut atteindre une vraie personne
     peupler     génère des adhérents fictifs, des groupes et des structures
     formulaire  les questions d'un formulaire HelloAsso rencontrent-elles le code
+    ovh         la liste de diffusion de test, et la clé qui la vise
 
 Usage :
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py comparer --base appXXXX
@@ -30,6 +31,7 @@ Usage :
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py peupler  --base appXXXX --nombre 40
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py peupler  --base appXXXX --appliquer
     PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py formulaire --formulaire "Bac à sable — adhésion"
+    PYTHONPATH=. .venv/bin/python scripts/bac_a_sable.py ovh --appliquer
 
 Le bac à sable se désigne par `--base`, ou par `AIRTABLE_BASE_ID_BAC_A_SABLE`
 dans le `.env`. La référence est `AIRTABLE_BASE_ID_PROD`.
@@ -64,6 +66,11 @@ TABLES_UTILES = [
 # ne peuvent structurellement pas recevoir de courrier. C'est ce qui fait de la
 # vérification d'adresses un contrôle et non une convention.
 DOMAINES_FICTIFS = ("example.org", "example.com", "example.net", "example.edu")
+
+# Nombre d'adresses citées dans un constat d'anomalie. En recracher 1400 rendrait
+# le message illisible, donc non lu — et un contrôle qu'on ne lit pas ne contrôle
+# rien.
+ADRESSES_CITEES = 5
 
 # Types de champs qu'Airtable refuse de créer par l'API. Le seul moyen de les
 # obtenir sans les ressaisir un par un est la duplication de base dans
@@ -273,11 +280,11 @@ def verifier(at, cible, reference=None):
         return 0
 
     print("❌ %d adresse(s) à un domaine réel — ce ne sont pas des données fictives" % len(suspectes))
-    for adresse in suspectes[:5]:
+    for adresse in suspectes[:ADRESSES_CITEES]:
         prenom, _, domaine = adresse.partition("@")
         print("   %s…@%s" % (prenom[:2], domaine))
-    if len(suspectes) > 5:
-        print("   (+%d autres)" % (len(suspectes) - 5))
+    if len(suspectes) > ADRESSES_CITEES:
+        print("   (+%d autres)" % (len(suspectes) - ADRESSES_CITEES))
 
     if reference:
         ref_schema = {t["name"]: t for t in at.schema(reference)}
@@ -434,6 +441,176 @@ def peupler(at, cible, nombre, cotisation, appliquer, graine):
 
 
 # --------------------------------------------------------------------------
+# ovh — la liste de test, et surtout la clé qui la vise
+# --------------------------------------------------------------------------
+
+# Une opération sur une mailing list OVH n'est pas appliquée par l'appel : elle
+# est **mise en file comme une tâche**. Le POST rend un objet
+# `{"action": "mailinglist/addSubscriber", "id": …}` et l'abonné apparaît plus
+# tard, parfois bien plus tard.
+#
+# Ça se vérifie ici, et ça éclaire un défaut traîné depuis des mois : la
+# suppression sur la liste de production « ne fonctionne pas ». Elle n'échoue
+# pas — elle est acceptée puis mise en file, et c'est l'application qui manque.
+# Un contrôle qui conclurait à l'échec après quelques secondes se tromperait de
+# diagnostic et ferait chercher au mauvais endroit.
+#
+# D'où la règle retenue : **l'acceptation prouve le droit d'écrire, l'arrivée
+# effective se constate à un passage ultérieur.** Une non-arrivée n'est pas
+# comptée comme un écart, elle est dite.
+RELECTURES = 5
+ATTENTE = 3.0
+
+
+def _confinee(chemin, domaine, liste):
+    """La règle d'accès ne porte-t-elle que sur cette liste ?
+
+    Comparaison sur le préfixe **suivi d'un slash**, sinon une règle visant
+    « bac-a-sable-autre » passerait pour une règle visant « bac-a-sable ».
+    """
+    prefixe = "/email/domain/%s/mailingList/%s" % (domaine, liste)
+    return chemin == prefixe or chemin.startswith(prefixe + "/")
+
+
+def _abonnes(client, domaine, liste):
+    return client.get("/email/domain/%s/mailingList/%s/subscriber" % (domaine, liste))
+
+
+def _attendre(client, domaine, liste, adresse, presente):
+    """Attend que l'adresse soit là — ou n'y soit plus. Rend l'état atteint."""
+    import time
+    for _ in range(RELECTURES):
+        actuels = {a.lower() for a in _abonnes(client, domaine, liste)}
+        if (adresse.lower() in actuels) == presente:
+            return True
+        time.sleep(ATTENTE)
+    return False
+
+
+def verifier_ovh(client, mailing_client, domaine, liste, liste_production, appliquer):
+    """La liste de test est-elle utilisable, et la clé est-elle une ceinture ?
+
+    L'ordre des contrôles n'est pas indifférent. Les **droits de la clé** passent
+    en premier parce que c'est le seul contrôle qui porte sur une garantie et non
+    sur un état : une liste peut être saine aujourd'hui et polluée demain, tandis
+    qu'une clé confinée rend l'accident impossible tant qu'elle n'est pas
+    remplacée. Le 27/08/2026, la clé du bac à sable était celle de la production,
+    autorisée sur la seule liste des adhérents réels : rien dans la configuration
+    ne le disait, et rien ne l'aurait dit.
+    """
+    ecarts = 0
+    print("domaine    : %s" % domaine)
+    print("liste visée: %s" % liste)
+    print()
+
+    # 1. Les droits de la clé.
+    print("1. Droits de la clé")
+    try:
+        cred = client.get("/auth/currentCredential")
+    except Exception as e:
+        print("   ❌ impossible de lire les droits : %s" % str(e)[:120])
+        return 1
+    regles = cred.get("rules", [])
+    if not regles:
+        print("   ❌ aucune règle d'accès lisible")
+        ecarts += 1
+    for r in regles:
+        if _confinee(r["path"], domaine, liste):
+            print("   ✅ %-7s %s" % (r["method"], r["path"]))
+        else:
+            print("   ❌ %-7s %s" % (r["method"], r["path"]))
+            print("      cette règle déborde de « %s » : la clé peut atteindre autre chose "
+                  "que le bac à sable." % liste)
+            ecarts += 1
+    if liste_production and liste == liste_production:
+        print("   ❌ la liste visée EST celle de production")
+        ecarts += 1
+    if ecarts:
+        print()
+        print("→ la ceinture n'en est pas une, on s'arrête là.")
+        return 1
+
+    # 2. La liste existe.
+    print()
+    print("2. La liste")
+    try:
+        abonnes = _abonnes(client, domaine, liste)
+    except Exception as e:
+        print("   ❌ %s : %s" % (type(e).__name__, str(e)[:120]))
+        print("      (l'énumération /mailingList n'est jamais autorisée : on interroge")
+        print("       toujours une liste par son nom)")
+        return 1
+    print("   ✅ existe — %d abonné(s)" % len(abonnes))
+
+    # 3. Hygiène des adresses, même invariant que pour Airtable.
+    print()
+    print("3. Adresses")
+    reelles = [a for a in abonnes if not a.strip().lower().endswith(DOMAINES_FICTIFS)]
+    if reelles:
+        print("   ❌ %d adresse(s) à un domaine réel" % len(reelles))
+        for a in reelles[:ADRESSES_CITEES]:
+            debut, _, dom = a.partition("@")
+            print("      %s…@%s" % (debut[:2], dom))
+        ecarts += 1
+    else:
+        print("   ✅ aucune adresse à un domaine réel")
+
+    # 4. L'écriture, qui est la seule preuve qui compte.
+    print()
+    print("4. Écriture")
+    if not appliquer:
+        print("   simulation — relancer avec --appliquer pour prouver l'aller-retour")
+        print()
+        print("→ %d écart(s)" % ecarts if ecarts else "→ lecture conforme, écriture non prouvée")
+        return 1 if ecarts else 0
+
+    temoin = "temoin-bac-a-sable@example.org"
+    present = temoin.lower() in {a.lower() for a in abonnes}
+
+    if present:
+        print("   ·  le témoin d'un passage précédent est arrivé : l'ajout s'applique bien")
+    else:
+        # add_subscriber est exactement ce qu'appelle hello_asso_sync : la preuve
+        # passe par le chemin de production, pas par un appel écrit pour l'occasion.
+        if not mailing_client.add_subscriber(temoin):
+            print("   ❌ abonnement refusé (détail en syslog)")
+            print()
+            print("→ %d écart(s)" % (ecarts + 1))
+            return 1
+        print("   ✅ abonnement accepté — le droit d'écrire est prouvé")
+        present = _attendre(client, domaine, liste, temoin, presente=True)
+        if not present:
+            print("   ⏳ pas encore appliqué après %d s : OVH traite l'opération en tâche"
+                  % int(RELECTURES * ATTENTE))
+            print("      de fond. Ce n'est pas un échec. Relancer cette commande plus tard :")
+            print("      le témoin doit y être, et il sera retiré à ce moment-là.")
+            print()
+            print("→ %d écart(s)" % ecarts if ecarts
+                  else "→ droits et lecture conformes, application en attente")
+            return 1 if ecarts else 0
+
+    try:
+        client.delete("/email/domain/%s/mailingList/%s/subscriber/%s" % (domaine, liste, temoin))
+    except Exception as e:
+        print("   ❌ suppression refusée : %s" % str(e)[:110])
+        ecarts += 1
+    else:
+        print("   ✅ suppression acceptée")
+        if _attendre(client, domaine, liste, temoin, presente=False):
+            print("   ✅ appliquée : la liste est rendue dans l'état trouvé")
+        else:
+            print("   ⏳ acceptée, pas encore appliquée après %d s."
+                  % int(RELECTURES * ATTENTE))
+            print("      À surveiller : c'est la forme exacte du défaut de suppression")
+            print("      constaté sur la liste de production. Il se diagnostique enfin ici,")
+            print("      sans toucher à 144 personnes réelles.")
+
+    print()
+    print("→ %d écart(s)" % ecarts if ecarts else "→ la liste de test est utilisable")
+    return 1 if ecarts else 0
+
+
+# --------------------------------------------------------------------------
 # formulaire — les questions rencontrent-elles le code
 # --------------------------------------------------------------------------
 
@@ -533,6 +710,63 @@ def formulaire(client, titre_reference, titre_test):
 
 # --------------------------------------------------------------------------
 
+def _conf_locale(chemin):
+    """Section `conf` du config JSON local, si présent. Jamais de valeur client en dur."""
+    if not os.path.exists(chemin):
+        return {}
+    import json
+    with open(chemin, encoding="utf-8") as f:
+        return json.load(f).get("conf", {})
+
+
+def _ovh_depuis_args(args):
+    """Monte le client OVH du bac à sable.
+
+    Les identifiants dédiés priment. À défaut, on retombe sur les identifiants
+    généraux **en le disant** : le premier contrôle refusera, et son message
+    expliquera pourquoi mieux qu'un refus ici. Une ceinture qu'on voit se
+    déclencher enseigne davantage qu'une ceinture qui empêche de partir.
+    """
+    import ovh as ovh_api
+
+    conf = _conf_locale(args.config)
+    liste_prod = conf.get("ovh", {}).get("mailing_list", {}).get("name")
+    domaine = (args.domaine or os.getenv("OVH_MAILING_LIST_DOMAIN")
+               or conf.get("ovh", {}).get("mailing_list", {}).get("domain"))
+    liste = args.liste or os.getenv("OVH_MAILING_LIST_BAC_A_SABLE") or "bac-a-sable"
+    if not domaine:
+        sys.exit("Domaine inconnu : --domaine, OVH_MAILING_LIST_DOMAIN, ou le config JSON.")
+
+    dedies = {suffixe: os.getenv("OVH_%s_BAC_A_SABLE" % suffixe)
+              for suffixe in ("APP_KEY", "APP_SECRET", "CONSUMER_KEY")}
+    if all(dedies.values()):
+        cles = dedies
+    else:
+        cles = {s: os.getenv("OVH_" + s) for s in ("APP_KEY", "APP_SECRET", "CONSUMER_KEY")}
+        if not all(cles.values()):
+            sys.exit("Aucun identifiant OVH dans le .env. Créer une clé restreinte à « %s » "
+                     "sur https://eu.api.ovh.com/createToken/ et la poser dans "
+                     "OVH_APP_KEY_BAC_A_SABLE / OVH_APP_SECRET_BAC_A_SABLE / "
+                     "OVH_CONSUMER_KEY_BAC_A_SABLE." % liste)
+        print("⚠  Pas d'identifiants dédiés au bac à sable (OVH_*_BAC_A_SABLE) :")
+        print("   on essaie avec les identifiants généraux, qui sont ceux de la production.")
+        print()
+
+    point = os.getenv("OVH_ENDPOINT", "ovh-eu")
+    client = ovh_api.Client(endpoint=point,
+                            application_key=cles["APP_KEY"],
+                            application_secret=cles["APP_SECRET"],
+                            consumer_key=cles["CONSUMER_KEY"])
+
+    from src.clients.ovh_client import OVHMailingClient
+    mailing = OVHMailingClient(
+        application_key=cles["APP_KEY"], application_secret=cles["APP_SECRET"],
+        consumer_key=cles["CONSUMER_KEY"], domain=domaine,
+        mailing_list_name=liste, endpoint=point)
+
+    return verifier_ovh(client, mailing, domaine, liste, liste_prod, args.appliquer)
+
+
 def _formulaire_depuis_args(args):
     """Monte le client HelloAsso depuis la configuration locale.
 
@@ -569,7 +803,7 @@ def main():
     load_dotenv()
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("action", choices=["comparer", "verifier", "peupler", "formulaire"])
+    p.add_argument("action", choices=["comparer", "verifier", "peupler", "formulaire", "ovh"])
     p.add_argument("--base", help="identifiant du bac à sable (défaut : AIRTABLE_BASE_ID_BAC_A_SABLE)")
     p.add_argument("--reference", help="base de référence (défaut : AIRTABLE_BASE_ID_PROD)")
     p.add_argument("--nombre", type=int, default=40, help="adhérents fictifs à créer (défaut 40)")
@@ -582,12 +816,17 @@ def main():
                         "config JSON, ou HELLOASSO_FORM_REFERENCE)")
     p.add_argument("--config", default="config/hello-asso-automation-conf.json",
                    help="formulaire : config d'où lire organisation et formulaire de référence")
+    p.add_argument("--liste", help="ovh : liste de diffusion de test (défaut : "
+                                   "OVH_MAILING_LIST_BAC_A_SABLE, sinon bac-a-sable)")
+    p.add_argument("--domaine", help="ovh : domaine de la liste (défaut : celui du config JSON)")
     p.add_argument("--croiser-prod", action="store_true",
                    help="verifier : dire aussi combien d'adresses suspectes sont en production")
     args = p.parse_args()
 
     if args.action == "formulaire":
         return _formulaire_depuis_args(args)
+    if args.action == "ovh":
+        return _ovh_depuis_args(args)
 
     cible = args.base or os.getenv("AIRTABLE_BASE_ID_BAC_A_SABLE")
     reference = args.reference or os.getenv("AIRTABLE_BASE_ID_PROD")

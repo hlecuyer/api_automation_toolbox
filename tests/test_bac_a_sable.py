@@ -268,3 +268,147 @@ class TestContratDuFormulaire:
     def test_formulaire_introuvable(self, contrat, capsys):
         with pytest.raises(SystemExit):
             self.lancer(contrat, {"prod": ["Genre"]}, "absent", None, capsys)
+
+
+class FauxOvh:
+    """Sert des règles d'accès et des abonnés, sans réseau."""
+
+    def __init__(self, regles, abonnes=None, refuse_delete=False):
+        self.regles = regles
+        self.abonnes = list(abonnes or [])
+        self.refuse_delete = refuse_delete
+        self.supprimes = []
+
+    def get(self, chemin):
+        if chemin == "/auth/currentCredential":
+            return {"status": "validated", "rules": self.regles}
+        return list(self.abonnes)
+
+    def delete(self, chemin):
+        if self.refuse_delete:
+            raise RuntimeError("This call has not been granted")
+        adresse = chemin.rsplit("/", 1)[-1]
+        self.supprimes.append(adresse)
+        self.abonnes = [a for a in self.abonnes if a.lower() != adresse.lower()]
+
+
+class FauxClientListe:
+    def __init__(self, ovh, accepte=True):
+        self.ovh, self.accepte, self.ajoutes = ovh, accepte, []
+
+    def add_subscriber(self, email):
+        if not self.accepte:
+            return False
+        self.ajoutes.append(email)
+        self.ovh.abonnes.append(email)
+        return True
+
+
+def regles(*chemins, methode="GET"):
+    return [{"method": methode, "path": c} for c in chemins]
+
+
+CONFINEE = regles(
+    "/email/domain/d.org/mailingList/bac-a-sable",
+    "/email/domain/d.org/mailingList/bac-a-sable/*",
+)
+
+
+class TestOvh:
+    """La clé est le seul contrôle qui porte sur une garantie, pas sur un état."""
+
+    @pytest.fixture(autouse=True)
+    def sans_attente(self, monkeypatch):
+        monkeypatch.setattr(bac, "RELECTURES", 1)
+        monkeypatch.setattr(bac, "ATTENTE", 0)
+
+    def lancer(self, ovh, capsys, liste_prod=None, appliquer=False, client=None):
+        code = bac.verifier_ovh(ovh, client or FauxClientListe(ovh), "d.org",
+                                "bac-a-sable", liste_prod, appliquer)
+        return code, capsys.readouterr().out
+
+    def test_regle_trop_large_refusee(self, capsys):
+        """Une règle sur /mailingList/* couvre aussi la liste des adhérents réels."""
+        o = FauxOvh(regles("/email/domain/d.org/mailingList/*"))
+        code, sortie = self.lancer(o, capsys)
+        assert code == 1
+        assert "déborde" in sortie and "la ceinture n'en est pas une" in sortie
+
+    def test_une_liste_au_nom_voisin_ne_passe_pas(self, capsys):
+        """« bac-a-sable-autre » ne doit pas passer pour « bac-a-sable »."""
+        o = FauxOvh(regles("/email/domain/d.org/mailingList/bac-a-sable-autre/*"))
+        code, _ = self.lancer(o, capsys)
+        assert code == 1
+
+    def test_liste_de_production_refusee(self, capsys):
+        o = FauxOvh(CONFINEE)
+        code, sortie = self.lancer(o, capsys, liste_prod="bac-a-sable")
+        assert code == 1
+        assert "EST celle de production" in sortie
+
+    def test_le_refus_arrete_avant_de_lire(self, capsys):
+        """Rien ne doit être tenté avec une clé dont on sait qu'elle déborde."""
+        o = FauxOvh(regles("/email/domain/d.org/mailingList/*"), abonnes=["x@example.org"])
+        code, sortie = self.lancer(o, capsys, appliquer=True)
+        assert code == 1
+        assert "2. La liste" not in sortie
+        assert o.supprimes == []
+
+    def test_adresse_reelle_signalee(self, capsys):
+        o = FauxOvh(CONFINEE, abonnes=["vrai@gmail.com", "faux@example.org"])
+        code, sortie = self.lancer(o, capsys)
+        assert code == 1
+        assert "domaine réel" in sortie
+
+    def test_lecture_seule_sans_appliquer(self, capsys):
+        o = FauxOvh(CONFINEE, abonnes=["faux@example.org"])
+        code, sortie = self.lancer(o, capsys)
+        assert code == 0
+        assert "écriture non prouvée" in sortie
+        assert o.supprimes == []
+
+    def test_aller_retour_complet(self, capsys):
+        o = FauxOvh(CONFINEE)
+        client = FauxClientListe(o)
+        code, sortie = self.lancer(o, capsys, appliquer=True, client=client)
+        assert code == 0
+        assert client.ajoutes == ["temoin-bac-a-sable@example.org"]
+        assert o.supprimes == ["temoin-bac-a-sable@example.org"]
+        assert o.abonnes == []
+        assert "état trouvé" in sortie
+
+    def test_abonnement_refuse(self, capsys):
+        o = FauxOvh(CONFINEE)
+        code, sortie = self.lancer(o, capsys, appliquer=True,
+                                   client=FauxClientListe(o, accepte=False))
+        assert code == 1
+        assert "abonnement refusé" in sortie
+
+    def test_suppression_refusee(self, capsys):
+        o = FauxOvh(CONFINEE, abonnes=["temoin-bac-a-sable@example.org"], refuse_delete=True)
+        code, sortie = self.lancer(o, capsys, appliquer=True)
+        assert code == 1
+        assert "suppression refusée" in sortie
+
+    def test_le_temoin_deja_present_ne_provoque_pas_de_doublon(self, capsys):
+        """Il prouve au passage que l'ajout du passage précédent s'est appliqué."""
+        o = FauxOvh(CONFINEE, abonnes=["temoin-bac-a-sable@example.org"])
+        client = FauxClientListe(o)
+        code, sortie = self.lancer(o, capsys, appliquer=True, client=client)
+        assert code == 0
+        assert client.ajoutes == []
+        assert "l'ajout s'applique bien" in sortie
+
+
+class TestConfinement:
+    @pytest.mark.parametrize("chemin,attendu", [
+        ("/email/domain/d.org/mailingList/bac-a-sable", True),
+        ("/email/domain/d.org/mailingList/bac-a-sable/subscriber", True),
+        ("/email/domain/d.org/mailingList/bac-a-sable/*", True),
+        ("/email/domain/d.org/mailingList/*", False),
+        ("/email/domain/d.org/mailingList/membres/*", False),
+        ("/email/domain/d.org/mailingList/bac-a-sable-autre/*", False),
+        ("/*", False),
+    ])
+    def test_confinee(self, chemin, attendu):
+        assert bac._confinee(chemin, "d.org", "bac-a-sable") is attendu
