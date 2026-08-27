@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import json
+import re
 import syslog
 import argparse
 from src.config_loader import load_config
@@ -55,7 +56,8 @@ class SyncHelloAsso:
         """Statut pessimiste par défaut : seul un passage qui va au bout le
         remet à « ok ». Un retour anticipé ou une exception laisse donc
         « échec », sans avoir à y penser à chaque point de sortie."""
-        return {"statut": "échec", "vues": 0, "traitées": 0, "erreurs": 0}
+        return {"statut": "échec", "vues": 0, "traitées": 0, "erreurs": 0,
+                "non_rattachés": "?"}
 
     def _init_clients(self):
         """Initialize all service clients."""
@@ -204,6 +206,55 @@ class SyncHelloAsso:
             processed_emails.add(subscription.email)
 
 
+    def _compter_non_rattaches(self):
+        """Compte les adhérents à jour de cotisation rattachés à aucun groupe d'adhérents.
+
+        Le 27/08/2026, un adhérent ayant réglé par chèque le 18/02 n'avait été
+        rattaché à rien : ni groupe, ni liste de diffusion, pendant six mois.
+        Découvert par hasard, en tirant un autre fil. Une absence ne fait pas de
+        bruit, donc rien ne pouvait la signaler.
+
+        La synchronisation HelloAsso, elle, ne rate personne. Le trou est le
+        paiement par chèque, saisi à la main dans Airtable, qui court-circuite
+        toute l'automatisation. Ce compteur est le filet de ce canal-là.
+
+        Deux points de conception qui valent d'être dits :
+
+        - **L'année se déduit de `cotisation_label`**, elle n'est pas écrite en
+          dur. Sinon le contrôle deviendrait faux au 1er janvier, en silence, et
+          ce serait un défaut de la même famille que celui qu'il surveille.
+        - **La formule cherche l'année dans la cotisation**, pas un libellé
+          exact : « Payé 2026 » et « paiement par chèque 2026 » sont donc pris
+          tous les deux, et c'est justement le second qui nous intéresse.
+
+        Ne lève jamais : un filet qui fait tomber le trapéziste ne sert à rien.
+        En cas d'échec le compte reste « ? », ce qui se voit dans la ligne de
+        vie — un inconnu se dit, il ne se tait pas.
+        """
+        try:
+            annee = re.search(r"\d{4}", self.conf.get("cotisation_label", ""))
+            groupe = self.conf.get("groupe")
+            if not annee or not groupe:
+                return
+            formule = (
+                "AND(FIND('{annee}', {{Cotisation LCDC}}),"
+                " NOT(FIND('{groupe}', ARRAYJOIN({{Groupe(s)}}))))"
+            ).format(annee=annee.group(0), groupe=groupe.replace("'", "\\'"))
+            fiches = self.airtable_client.list_records(filter_by_formula=formule)
+            self._compteurs["non_rattachés"] = len(fiches)
+            if fiches:
+                syslog.syslog(
+                    syslog.LOG_WARNING,
+                    "hello_asso_sync: %d adhérent(s) à jour non rattaché(s) au groupe "
+                    "« %s » — probablement une adhésion réglée par chèque, saisie à la "
+                    "main sans rattachement" % (len(fiches), groupe),
+                )
+        except Exception as e:
+            syslog.syslog(
+                syslog.LOG_WARNING,
+                "hello_asso_sync: contrôle de rattachement impossible (%s)" % e,
+            )
+
     def update_date_conf(self):
         """Update subscription_after field with today's date
         (to avoid syncing several time the same user)"""
@@ -255,7 +306,7 @@ class SyncHelloAsso:
             syslog.LOG_INFO,
             "hello_asso_sync: passage terminé "
             "statut={statut} vues={vues} traitées={traitées} erreurs={erreurs} "
-            "curseur={curseur}".format(
+            "non_rattachés={non_rattachés} curseur={curseur}".format(
                 curseur=self.conf["helloAsso"].get("subscription_after", "inconnu"),
                 **compteurs,
             ),
@@ -318,6 +369,7 @@ class SyncHelloAsso:
             if self.dry_run == "full":
                 print(f"  [DRY RUN] Config: subscription_after date NOT updated")
         
+        self._compter_non_rattaches()
         self._compteurs["statut"] = "ok"
 
 
