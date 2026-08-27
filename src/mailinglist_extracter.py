@@ -8,6 +8,7 @@ import json
 import argparse
 
 from src.config_loader import load_config
+from src import heartbeat
 
 
 REQUIRED_FIELDS = [
@@ -28,8 +29,17 @@ def normaliser_email(email):
 
 
 class CheckOvhMailinglist:
+    COMPTEURS_NEUFS = {
+        "statut": "échec",
+        "listes": 0,
+        "ajouts": 0,
+        "suppressions": 0,
+        "erreurs": 0,
+    }
+
     def __init__(self, config_path):
         self.conf_path = config_path
+        self._compteurs = dict(self.COMPTEURS_NEUFS)
         try:
             config = load_config(config_path, required_fields=REQUIRED_FIELDS)
             self.conf_global = config
@@ -248,11 +258,13 @@ class CheckOvhMailinglist:
         for email in ovh_subscribers:
             if normaliser_email(email) not in connus_airtable:
                 print("delete " + email + (" from " + label if label else ""))
+                self._compteurs["suppressions"] += 1
                 self.DeleteOvhMailinglistSubscriber(mailing_list, email)
 
         for email in airtable_subscribers:
             if normaliser_email(email) not in connus_ovh:
                 print("add " + email + (" in " + label if label else ""))
+                self._compteurs["ajouts"] += 1
                 self.AddOvhMailingListSubscriber(mailing_list, email)
 
     def SyncMailingList(self):
@@ -307,9 +319,11 @@ class CheckOvhMailinglist:
                 "name": item,
                 "domain": self.conf["auto_sync_mailing_list"]["ovh_domain"],
             }
+            self._compteurs["listes"] += 1
             try:
                 ovh_subscribers.extend(self.GetOvhMailingListSub(mailing_list))
             except ovh.exceptions.ResourceNotFoundError as e:
+                self._compteurs["erreurs"] += 1
                 msg = "The mailing list {} does not exists".format(mailing_list)
                 syslog.syslog(syslog.LOG_ERR, msg)
                 print("ERROR: " + msg, file=sys.stderr)
@@ -340,6 +354,38 @@ class CheckOvhMailinglist:
 
     # Class "entry point"
     def Run(self):
+        """Le passage, encadré par sa ligne de vie.
+
+        Sans elle, un passage sans rien à faire n'écrit aucune ligne, exactement
+        comme un passage qui n'a pas eu lieu. C'est ce qui a permis à la liste
+        `membres` de supprimer seize adresses par jour pendant des mois sans que
+        personne ne le voie : le seul modèle de détection était la plainte d'un
+        adhérent, et aucune n'est arrivée.
+        """
+        self._compteurs = dict(self.COMPTEURS_NEUFS)
+        try:
+            self._executer()
+            self._compteurs["statut"] = "ok"
+        finally:
+            self._signaler_fin_de_passage()
+
+    def _signaler_fin_de_passage(self):
+        """Ligne de vie en syslog et sur stdout.
+
+        Ici stdout est redirigé vers mailinglist.log par le cron : la ligne y a
+        sa place, c'est le fichier qu'on ouvre pour savoir ce qui s'est passé, et
+        une anomalie de volume (1730 suppressions pour 30 ajouts) y devient
+        lisible d'un coup d'œil au lieu de se noyer.
+        """
+        ligne = (
+            "mailinglist_extracter: passage terminé "
+            "statut={statut} listes={listes} ajouts={ajouts} "
+            "suppressions={suppressions} erreurs={erreurs}".format(**self._compteurs)
+        )
+        syslog.syslog(syslog.LOG_INFO, ligne)
+        print(ligne)
+
+    def _executer(self):
         if "list_mailing_list" in self.conf:
             self.GetOvhAllMailingListSub(self.conf["list_mailing_list"])
         if "compare" in self.conf:
@@ -362,6 +408,7 @@ def main(argv=None):
     try:
         app = CheckOvhMailinglist(args.conf)
         app.Run()
+        heartbeat.signaler("HEARTBEAT_URL_MAILINGLIST", succes=True)
         return 0
     except Exception as e:
         # Surface failures via stderr so cron's MAILTO catches them.
@@ -370,6 +417,7 @@ def main(argv=None):
         syslog.syslog(syslog.LOG_ERR, "mailinglist_extracter failed: {}".format(e))
         print("ERROR: mailinglist_extracter failed: {}".format(e), file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
+        heartbeat.signaler("HEARTBEAT_URL_MAILINGLIST", succes=False)
         return 1
 
 

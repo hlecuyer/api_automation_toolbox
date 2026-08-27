@@ -13,6 +13,7 @@ from src.clients import (
 )
 from src.models import UserSubscription
 from src.templates import welcome_email
+from src import heartbeat
 
 # Class to sync data from hello-asso to Airtable
 
@@ -35,6 +36,7 @@ class SyncHelloAsso:
         """
         self.conf_path = config_path
         self.dry_run = dry_run
+        self._compteurs = self._compteurs_neufs()
         try:
             # Load config from JSON file with credentials from env vars
             config = load_config(config_path)
@@ -48,6 +50,13 @@ class SyncHelloAsso:
         # Initialize clients
         self._init_clients()
     
+    @staticmethod
+    def _compteurs_neufs():
+        """Statut pessimiste par défaut : seul un passage qui va au bout le
+        remet à « ok ». Un retour anticipé ou une exception laisse donc
+        « échec », sans avoir à y penser à chaque point de sortie."""
+        return {"statut": "échec", "vues": 0, "traitées": 0, "erreurs": 0}
+
     def _init_clients(self):
         """Initialize all service clients."""
         # Initialize HelloAsso client
@@ -118,6 +127,7 @@ class SyncHelloAsso:
             filter_date: Only process subscriptions after this date
         """
         processed_emails = set()
+        self._compteurs["vues"] = len(subscriptions)
         
         for subscription in subscriptions:
             # Skip duplicates
@@ -144,11 +154,14 @@ class SyncHelloAsso:
                     )
                 
                 if not result:
+                    self._compteurs["erreurs"] += 1
                     syslog.syslog(
                         syslog.LOG_ERR,
                         f"Failed to sync {subscription.email} to Airtable",
                     )
                     continue
+                
+                self._compteurs["traitées"] += 1
                 
                 # Add to OVH mailing list
                 if self.dry_run in ("full", "only_airtable"):
@@ -182,6 +195,7 @@ class SyncHelloAsso:
                             f"Confirmation email sent to {subscription.email}",
                         )
                     except Exception as e:
+                        self._compteurs["erreurs"] += 1
                         syslog.syslog(
                             syslog.LOG_ERR,
                             f"Failed to send confirmation email to {subscription.email}: {str(e)}",
@@ -207,7 +221,54 @@ class SyncHelloAsso:
             raise e
 
     def run(self):
-        """Main entry point for synchronization."""
+        """Main entry point for synchronization.
+
+        Le corps réel est dans `_executer`. Ce niveau ne sert qu'à garantir la
+        ligne de fin de passage et le ping de supervision, y compris quand
+        `_executer` part par un retour anticipé ou par une exception.
+
+        Sans cette ligne, une journée sans nouvelle adhésion et une journée où
+        le script n'a pas tourné du tout produisent le même log, c'est-à-dire
+        rien. C'est l'angle mort qui a laissé la liste `membres` supprimer
+        seize adresses par jour pendant des mois sans que personne ne le voie.
+        """
+        self._compteurs = self._compteurs_neufs()
+        try:
+            self._executer()
+        finally:
+            self._signaler_fin_de_passage()
+
+    def _signaler_fin_de_passage(self):
+        """Écrit la ligne de vie et ping le dead man's switch.
+
+        Uniquement en syslog : le cron de ce script ne redirige pas stdout et
+        `MAILTO` est configuré, donc un print deviendrait un mail quotidien,
+        qu'on cesserait de lire en deux semaines. Le silence reviendrait par la
+        fenêtre.
+
+        Le curseur figure dans la ligne parce qu'il était jusqu'ici le seul
+        signal de vie, et qu'il fallait ouvrir config.json sur le serveur pour
+        le connaître.
+        """
+        compteurs = self._compteurs
+        syslog.syslog(
+            syslog.LOG_INFO,
+            "hello_asso_sync: passage terminé "
+            "statut={statut} vues={vues} traitées={traitées} erreurs={erreurs} "
+            "curseur={curseur}".format(
+                curseur=self.conf["helloAsso"].get("subscription_after", "inconnu"),
+                **compteurs,
+            ),
+        )
+        # Une erreur unitaire ne rend pas le passage suspect : le voyant dit
+        # « le passage a eu lieu », pas « tout est parfait ». Le compteur
+        # d'erreurs porte le reste.
+        heartbeat.signaler(
+            "HEARTBEAT_URL_SYNC", succes=compteurs["statut"] == "ok"
+        )
+
+    def _executer(self):
+        """Le passage lui-même."""
         # Get form details
         form_detail = self.hello_asso_client.get_form_details(
             self.conf["helloAsso"]["form_name"]
@@ -256,6 +317,8 @@ class SyncHelloAsso:
             )
             if self.dry_run == "full":
                 print(f"  [DRY RUN] Config: subscription_after date NOT updated")
+        
+        self._compteurs["statut"] = "ok"
 
 
 if __name__ == "__main__":

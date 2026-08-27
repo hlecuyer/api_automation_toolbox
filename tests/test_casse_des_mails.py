@@ -117,8 +117,13 @@ class ListeFactice:
     """Un CheckOvhMailinglist réduit à ce que ReconcileSubscribers appelle."""
 
     def __init__(self):
+        from src.mailinglist_extracter import CheckOvhMailinglist
+
         self.supprimes = []
         self.ajoutes = []
+        # ReconcileSubscribers compte les appels OVH réellement émis : c'est de
+        # là que sort la ligne de vie du passage.
+        self._compteurs = dict(CheckOvhMailinglist.COMPTEURS_NEUFS)
 
     def DeleteOvhMailinglistSubscriber(self, mailing_list, email):
         self.supprimes.append(email)
