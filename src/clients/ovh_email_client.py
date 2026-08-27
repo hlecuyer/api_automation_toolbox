@@ -9,6 +9,8 @@ from email import encoders
 from typing import List, Optional, Dict, Tuple
 import ovh
 
+from src import garde_fou_envoi
+
 
 class OVHEmailClient:
     """Client for sending emails through SMTP (with fallback to OVH API for domain info)."""
@@ -85,6 +87,19 @@ class OVHEmailClient:
         Returns:
             True if email sent successfully, False otherwise
         """
+        # Le garde-fou passe avant tout le reste, y compris avant le dry_run :
+        # hors production, une adresse absente de la liste blanche ne doit pas
+        # même être simulée comme joignable. Voir src/garde_fou_envoi.py.
+        autorise, refus = garde_fou_envoi.verifier(
+            list(to or []) + list(cc or []) + list(bcc or [])
+        )
+        if not autorise:
+            syslog.syslog(
+                syslog.LOG_ERR,
+                "garde-fou d'envoi : envoi refusé — {}".format(refus),
+            )
+            return False
+
         if dry_run:
             syslog.syslog(
                 syslog.LOG_INFO,
