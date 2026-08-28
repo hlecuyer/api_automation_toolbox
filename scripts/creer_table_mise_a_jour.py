@@ -175,7 +175,6 @@ def champs_voulus(source, tables_par_nom):
 # formulaire les affiche tels quels et qu'un intitulé se lit mieux en phrase.
 ANCIENS_LIBELLES = {
     "E-mail": ["Adresse e-mail"],
-    "Mail optionnel": ["Autre adresse e-mail"],
     "date de naissance": ["Date de naissance"],
     "code postal": ["Code postal"],
     "Structure(s)": ["Votre structure"],
@@ -230,9 +229,13 @@ def imprimer_spec(voulus):
         print(ligne)
     print()
     print("Puis, dans le formulaire construit sur cette table :")
-    print("  · « %s » est prérempli et **masqué** (hide_%s=true dans l'URL) ;"
-          % (CHAMP_FICHE, CHAMP_FICHE))
-    print("  · « %s » n'apparaît pas dans le formulaire ;" % CHAMP_SYNCHRONISE)
+    print("  · « %s » **est dans le formulaire** — l'éditeur n'a pas de bouton pour"
+          % CHAMP_FICHE)
+    print("    le masquer, c'est le lien qui s'en charge (hide_%s=true). Absent du"
+          % CHAMP_FICHE)
+    print("    formulaire, il ne peut pas être prérempli, et la réponse ne désigne")
+    print("    plus aucune fiche ;")
+    print("  · « %s » n'est pas dans le formulaire ;" % CHAMP_SYNCHRONISE)
     print("  · la question sur la structure est limitée à une **vue filtrée**")
     print("    de Structures, sans autorisation d'en créer une nouvelle —")
     print("    c'est là que se gagne la qualité de la donnée, 577 structures")
@@ -460,7 +463,8 @@ def _rappel_formulaire():
     print()
     print("Reste à faire dans l'interface — l'API ne crée pas de formulaire :")
     print("  1. construire le formulaire sur cette table ;")
-    print("  2. masquer « %s » et « %s » ;" % (CHAMP_FICHE, CHAMP_SYNCHRONISE))
+    print("  2. y mettre « %s » sans chercher à le masquer dans l'éditeur —" % CHAMP_FICHE)
+    print("     c'est le lien qui le masque ; laisser « %s » dehors ;" % CHAMP_SYNCHRONISE)
     print("  3. limiter la question sur la structure à une vue filtrée de")
     print("     Structures, sans autorisation d'en créer une nouvelle ;")
     print("  4. reporter l'identifiant du formulaire (shrXXXX) dans la formule")

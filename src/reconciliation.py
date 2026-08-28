@@ -61,13 +61,15 @@ CHAMPS_TECHNIQUES = (CHAMP_FICHE, CHAMP_SYNCHRONISE)
 # champs, ce module pour les relire. Les deux ne peuvent pas diverger puisqu'ils
 # lisent la même liste, et le script vérifie à chaque passage que chaque colonne
 # visée existe bien dans l'Annuaire.
+# `Mail optionnel` n'y est pas : question retirée du formulaire par Hugo le
+# 28/08 — une seconde adresse n'a pas de sens à demander à l'adhérent. La colonne
+# reste dans l'Annuaire (elle sert au rapprochement, sept fiches en portent
+# plusieurs), elle ne sera simplement plus mise à jour par ce parcours.
 CHAMPS_FORMULAIRE = [
     ("Quel est votre nom ?", "Nom", ""),
     ("Quel est votre prénom ?", "Prénom", ""),
     ("À quelle adresse e-mail la Coop peut-elle vous écrire ?", "E-mail",
      "C'est à cette adresse que partiront les messages de la Coop."),
-    ("Avez-vous une autre adresse e-mail ?", "Mail optionnel",
-     "Facultatif. Une adresse de secours, si vous en avez une."),
     ("À quel numéro peut-on vous joindre ?", "Téléphone", "Facultatif."),
     ("Quel est votre genre ?", "Genre", ""),
     ("Quelle est votre date de naissance ?", "date de naissance", "Facultatif."),
