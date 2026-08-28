@@ -412,3 +412,86 @@ class TestConfinement:
     ])
     def test_confinee(self, chemin, attendu):
         assert bac._confinee(chemin, "d.org", "bac-a-sable") is attendu
+
+
+# --------------------------------------------------------------------------
+# L'exception déclarée — une adresse qui peut vraiment recevoir
+# --------------------------------------------------------------------------
+#
+# Prouver qu'un mail de bienvenue arrive demande une adresse capable de
+# recevoir, ce qu'aucun domaine réservé ne peut être. L'invariant « aucune
+# adresse réelle » s'ouvre donc, mais de la façon la plus étroite possible :
+# nominative, déclarée, et nommée à chaque passage. Ce qui est testé ici est
+# surtout ce qui doit rester fermé.
+
+
+class FauxAirtableAvecFiches(FauxAirtable):
+    def __init__(self, schemas, fiches):
+        super().__init__(schemas)
+        self.fiches = fiches
+
+    def enregistrements(self, base, table, champs=None):
+        return self.fiches
+
+
+def annuaire(adresses):
+    return {"appBAC": [table("Annuaire", [champ("E-mail", "email")])]}, [
+        {"id": "rec%d" % i, "fields": {"E-mail": a}} for i, a in enumerate(adresses)
+    ]
+
+
+class TestAdressesDeControle:
+    def test_lues_dans_l_environnement(self, monkeypatch):
+        monkeypatch.setenv(bac.VARIABLE_ADRESSES_DE_CONTROLE, "Hugo@DSI.coop , a@b.fr")
+        assert bac.adresses_de_controle() == {"hugo@dsi.coop", "a@b.fr"}
+
+    def test_l_argument_prime_sur_l_environnement(self, monkeypatch):
+        monkeypatch.setenv(bac.VARIABLE_ADRESSES_DE_CONTROLE, "a@b.fr")
+        assert bac.adresses_de_controle(["c@d.fr"]) == {"c@d.fr"}
+
+    @pytest.mark.parametrize("motif", ["*@dsi.coop", "*", "*@*", "dsi.coop"])
+    def test_un_motif_est_refuse(self, motif, monkeypatch, capsys):
+        """Un motif rouvrirait l'invariant à un domaine entier, et la première
+        adresse d'adhérent qui y atterrirait passerait inaperçue."""
+        monkeypatch.delenv(bac.VARIABLE_ADRESSES_DE_CONTROLE, raising=False)
+        assert bac.adresses_de_controle([motif]) == set()
+        assert "ignorée" in capsys.readouterr().err
+
+    def test_rien_de_declare_par_defaut(self, monkeypatch):
+        monkeypatch.delenv(bac.VARIABLE_ADRESSES_DE_CONTROLE, raising=False)
+        assert bac.adresses_de_controle() == set()
+
+
+class TestVerifierAvecException:
+    def lancer(self, adresses, controle, capsys):
+        schemas, fiches = annuaire(adresses)
+        code = bac.verifier(FauxAirtableAvecFiches(schemas, fiches), "appBAC",
+                            controle=controle)
+        return code, capsys.readouterr().out
+
+    def test_une_adresse_declaree_ne_fait_pas_echouer(self, capsys):
+        code, sortie = self.lancer(["a@example.org", "hugo@dsi.coop"],
+                                   {"hugo@dsi.coop"}, capsys)
+        assert code == 0
+        assert "adresse(s) de contrôle déclarée(s)" in sortie
+
+    def test_elle_est_nommee_a_chaque_passage(self, capsys):
+        """Une brèche silencieuse cesse d'être une brèche pour devenir un trou."""
+        _, sortie = self.lancer(["hugo@dsi.coop"], {"hugo@dsi.coop"}, capsys)
+        assert "hugo@dsi.coop" in sortie
+        assert "À retirer quand la démonstration est faite" in sortie
+
+    def test_une_adresse_reelle_non_declaree_fait_toujours_echouer(self, capsys):
+        code, sortie = self.lancer(["a@example.org", "adherent@coopdescommuns.org"],
+                                   {"hugo@dsi.coop"}, capsys)
+        assert code == 1
+        assert "domaine réel" in sortie
+
+    def test_l_exception_ne_s_etend_pas_au_domaine(self, capsys):
+        code, _ = self.lancer(["autre@dsi.coop"], {"hugo@dsi.coop"}, capsys)
+        assert code == 1
+
+    def test_sans_exception_le_comportement_est_inchange(self, capsys):
+        code, sortie = self.lancer(["a@example.org"], set(), capsys)
+        assert code == 0
+        assert "adresse(s) de contrôle" not in sortie

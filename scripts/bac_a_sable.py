@@ -67,6 +67,61 @@ TABLES_UTILES = [
 # vérification d'adresses un contrôle et non une convention.
 DOMAINES_FICTIFS = ("example.org", "example.com", "example.net", "example.edu")
 
+# L'exception déclarée, et c'est une brèche assumée dans l'invariant ci-dessus.
+#
+# Prouver qu'un mail de bienvenue **arrive** demande une adresse capable de
+# recevoir, ce qu'aucun domaine réservé ne peut être. Une adresse de contrôle
+# appartenant à l'équipe est donc admise — à trois conditions, et elles portent
+# tout le raisonnement :
+#
+# 1. **Déclarée**, jamais devinée : par `ADRESSES_DE_CONTROLE` ou par
+#    `--adresse-de-controle`. Rien d'implicite.
+# 2. **Nominative**, jamais un motif. `*@dsi.coop` rouvrirait l'invariant à un
+#    domaine entier, et la première adresse d'adhérent qui y atterrirait
+#    passerait inaperçue. Un motif est refusé, bruyamment.
+# 3. **Dite à chaque passage.** Le contrôle ne se tait pas parce qu'une
+#    exception existe : il la compte et la nomme. Une brèche silencieuse cesse
+#    d'être une brèche pour devenir un trou.
+VARIABLE_ADRESSES_DE_CONTROLE = "ADRESSES_DE_CONTROLE"
+
+
+def adresses_de_controle(declarees=None):
+    """Les adresses de contrôle déclarées, motifs écartés."""
+    brut = list(declarees or [])
+    if not brut:
+        brut = (os.getenv(VARIABLE_ADRESSES_DE_CONTROLE) or "").replace(";", ",").split(",")
+
+    retenues = set()
+    for morceau in brut:
+        adresse = (morceau or "").strip().lower()
+        if not adresse:
+            continue
+        if "*" in adresse or "@" not in adresse:
+            print("⚠  adresse de contrôle « %s » ignorée : il faut une adresse nominative, "
+                  "pas un motif." % adresse, file=sys.stderr)
+            continue
+        retenues.add(adresse)
+    return retenues
+
+
+def _hors_bac_a_sable(adresses, controle):
+    """Les adresses qui peuvent atteindre quelqu'un et qui ne sont pas déclarées."""
+    return [a for a in adresses
+            if not a.strip().lower().endswith(DOMAINES_FICTIFS)
+            and a.strip().lower() not in controle]
+
+
+def _dire_les_exceptions(adresses, controle):
+    """Nommer les adresses de contrôle rencontrées. Une brèche qui se voit."""
+    vues = sorted({a.strip().lower() for a in adresses if a.strip().lower() in controle})
+    if vues:
+        print("   ⚠  %d adresse(s) de contrôle déclarée(s), qui peuvent recevoir : %s"
+              % (len(vues), ", ".join(vues)))
+        print("      L'invariant « aucune adresse réelle » est ouvert pour celles-là,")
+        print("      et pour elles seules. À retirer quand la démonstration est faite.")
+    return len(vues)
+
+
 # Nombre d'adresses citées dans un constat d'anomalie. En recracher 1400 rendrait
 # le message illisible, donc non lu — et un contrôle qu'on ne lit pas ne contrôle
 # rien.
@@ -253,7 +308,7 @@ def _adresses(fiche):
     return [a.strip().lower() for a in brut if a.strip()]
 
 
-def verifier(at, cible, reference=None):
+def verifier(at, cible, reference=None, controle=()):
     """Le bac à sable ne peut-il atteindre personne ?
 
     Le contrôle porte sur le domaine, pas sur une liste de personnes connues :
@@ -266,14 +321,14 @@ def verifier(at, cible, reference=None):
         sys.exit("La base %s n'a pas de table « Annuaire »." % cible)
 
     fiches = at.enregistrements(cible, schema["Annuaire"]["id"])
-    suspectes, total = [], 0
+    toutes = []
     for fiche in fiches:
-        for adresse in _adresses(fiche["fields"]):
-            total += 1
-            if not adresse.endswith(DOMAINES_FICTIFS):
-                suspectes.append(adresse)
+        toutes += _adresses(fiche["fields"])
+    suspectes = _hors_bac_a_sable(toutes, controle)
 
-    print("bac à sable %s — Annuaire : %d fiche(s), %d adresse(s)" % (cible, len(fiches), total))
+    print("bac à sable %s — Annuaire : %d fiche(s), %d adresse(s)"
+          % (cible, len(fiches), len(toutes)))
+    _dire_les_exceptions(toutes, controle)
     if not suspectes:
         print("✅ toutes les adresses sont à un domaine réservé (%s)" % ", ".join(DOMAINES_FICTIFS))
         print("   Aucune ne peut être délivrée : ces domaines n'ont pas de MX.")
@@ -487,7 +542,8 @@ def _attendre(client, domaine, liste, adresse, presente):
     return False
 
 
-def verifier_ovh(client, mailing_client, domaine, liste, liste_production, appliquer):
+def verifier_ovh(client, mailing_client, domaine, liste, liste_production, appliquer,
+                 controle=()):
     """La liste de test est-elle utilisable, et la clé est-elle une ceinture ?
 
     L'ordre des contrôles n'est pas indifférent. Les **droits de la clé** passent
@@ -545,7 +601,8 @@ def verifier_ovh(client, mailing_client, domaine, liste, liste_production, appli
     # 3. Hygiène des adresses, même invariant que pour Airtable.
     print()
     print("3. Adresses")
-    reelles = [a for a in abonnes if not a.strip().lower().endswith(DOMAINES_FICTIFS)]
+    _dire_les_exceptions(abonnes, controle)
+    reelles = _hors_bac_a_sable(abonnes, controle)
     if reelles:
         print("   ❌ %d adresse(s) à un domaine réel" % len(reelles))
         for a in reelles[:ADRESSES_CITEES]:
@@ -764,7 +821,8 @@ def _ovh_depuis_args(args):
         consumer_key=cles["CONSUMER_KEY"], domain=domaine,
         mailing_list_name=liste, endpoint=point)
 
-    return verifier_ovh(client, mailing, domaine, liste, liste_prod, args.appliquer)
+    return verifier_ovh(client, mailing, domaine, liste, liste_prod, args.appliquer,
+                        adresses_de_controle(args.adresse_de_controle))
 
 
 def _formulaire_depuis_args(args):
@@ -819,6 +877,10 @@ def main():
     p.add_argument("--liste", help="ovh : liste de diffusion de test (défaut : "
                                    "OVH_MAILING_LIST_BAC_A_SABLE, sinon bac-a-sable)")
     p.add_argument("--domaine", help="ovh : domaine de la liste (défaut : celui du config JSON)")
+    p.add_argument("--adresse-de-controle", action="append", metavar="ADRESSE",
+                   help="adresse nominative autorisée à recevoir dans le bac à sable "
+                        "(défaut : ADRESSES_DE_CONTROLE). Répétable. Elle est nommée à "
+                        "chaque passage : la brèche doit se voir.")
     p.add_argument("--croiser-prod", action="store_true",
                    help="verifier : dire aussi combien d'adresses suspectes sont en production")
     args = p.parse_args()
@@ -851,7 +913,8 @@ def main():
             sys.exit("Aucune référence : --reference appXXXX, ou AIRTABLE_BASE_ID_PROD.")
         return comparer(at, reference, cible)
     if args.action == "verifier":
-        return verifier(at, cible, reference if args.croiser_prod else None)
+        return verifier(at, cible, reference if args.croiser_prod else None,
+                        adresses_de_controle(args.adresse_de_controle))
     return peupler(at, cible, args.nombre, args.cotisation, args.appliquer, args.graine)
 
 

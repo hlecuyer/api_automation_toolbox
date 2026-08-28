@@ -47,7 +47,9 @@ def cibles(**remplacements):
         "liste_production": "membres",
         "domaine": DOMAINE,
         "adresse": "parcours-1@example.org",
+        "controle": set(),
         "formulaire": "Bac à sable adhésion test",
+        "formulaire_production": "Adhésion année 2026",
         "jeton_airtable_dedie": True,
     }
     base.update(remplacements)
@@ -138,6 +140,63 @@ class TestCeinture:
         assert parcours.controler_cibles(
             cibles(jeton_airtable_dedie=False), FauxOvh()) == 0
         assert "non confinée" in capsys.readouterr().out
+
+
+class TestAdresseDeControle:
+    """L'exception déclarée : une adresse nominative, qui peut vraiment recevoir."""
+
+    def test_adresse_declaree_passe_et_la_breche_est_dite(self, capsys):
+        c = cibles(adresse="hugo@dsi.coop", controle={"hugo@dsi.coop"})
+        assert parcours.controler_cibles(c, FauxOvh()) == 0
+        sortie = capsys.readouterr().out
+        assert "elle PEUT recevoir" in sortie
+        assert "ouvert" in sortie
+
+    def test_adresse_declaree_mais_hors_liste_blanche_refusee(self, capsys):
+        """Déclarer une exception ne suffit pas : le garde-fou d'envoi doit la
+        connaître aussi, sinon le mail ne partirait pas et la démonstration
+        échouerait sans qu'on sache pourquoi."""
+        c = cibles(adresse="qui@ailleurs.fr", controle={"qui@ailleurs.fr"})
+        assert parcours.controler_cibles(c, FauxOvh()) == 1
+        assert "refusée par le garde-fou" in capsys.readouterr().out
+
+    def test_une_adresse_reelle_non_declaree_reste_refusee(self, capsys):
+        """La brèche est nominative : elle ne s'étend pas au domaine."""
+        c = cibles(adresse="autre@dsi.coop", controle={"hugo@dsi.coop"})
+        assert parcours.controler_cibles(c, FauxOvh()) == 1
+        assert "n'est pas déclarée" in capsys.readouterr().out
+
+
+class TestLivraison:
+    def test_livraison_reussie_est_constatee(self, capsys):
+        """Le mail part par la chaîne d'adhésion, à l'étape 4 : cette étape le
+        constate, elle ne le provoque pas."""
+        ecarts = parcours.etape_mail(client_mail(False), CONF, "Prosper", "hugo@dsi.coop",
+                                     compteurs={"traitées": 1, "erreurs": 0}, livraison=True)
+        assert ecarts == 0
+        assert "réellement envoyé à hugo@dsi.coop" in capsys.readouterr().out
+
+    def test_livraison_en_erreur_est_un_ecart(self, capsys):
+        ecarts = parcours.etape_mail(client_mail(False), CONF, "Prosper", "hugo@dsi.coop",
+                                     compteurs={"traitées": 1, "erreurs": 1}, livraison=True)
+        assert ecarts == 1
+        assert "n'est pas parti" in capsys.readouterr().out
+
+    def test_la_ceinture_est_eprouvee_meme_en_livraison(self, capsys):
+        """Le critère de recette ne se relâche pas parce qu'une exception
+        existe : une adresse d'adhérent doit rester injoignable."""
+        parcours.etape_mail(client_mail(True), CONF, "Prosper", "hugo@dsi.coop",
+                            compteurs={"traitées": 1, "erreurs": 0}, livraison=True)
+        sortie = capsys.readouterr().out
+        assert "laissé passer" in sortie
+        assert parcours.ADRESSE_TEMOIN_REFUS in sortie
+
+    def test_le_temoin_de_refus_n_est_pas_l_adresse_du_parcours(self):
+        """Sinon, en livraison, le témoin serait autorisé et ne prouverait rien."""
+        client = client_mail(False)
+        parcours.etape_mail(client, CONF, "Prosper", "hugo@dsi.coop",
+                            compteurs={"traitées": 1, "erreurs": 0}, livraison=True)
+        assert client.send_email.call_args.kwargs["to"] == [parcours.ADRESSE_TEMOIN_REFUS]
 
 
 # --------------------------------------------------------------------------
@@ -467,7 +526,8 @@ class TestMail:
         assert ecarts == 0
         sortie = capsys.readouterr().out
         assert "signature substituée" in sortie
-        assert "refusé par le garde-fou" in sortie
+        assert parcours.ADRESSE_TEMOIN_REFUS in sortie
+        assert "refusé" in sortie
 
     def test_un_envoi_qui_passe_est_un_ecart(self, capsys):
         """Le critère de recette du bac à sable, et il se démontre par un refus
@@ -498,7 +558,7 @@ class TestMail:
     def test_rendu_ecrit_sur_demande_avec_l_avertissement(self, tmp_path, capsys):
         fichier = tmp_path / "rendu.html"
         parcours.etape_mail(client_mail(False), CONF, "Prosper", "x@example.org",
-                            str(fichier))
+                            chemin_rendu=str(fichier))
 
         assert fichier.read_text(encoding="utf-8")
         assert "données" in capsys.readouterr().out
@@ -617,3 +677,125 @@ class TestCredentialsForces:
         assert instance.conf_global["credentials"]["airtable"]["api_key"] == "clé"
         assert instance.conf_global["credentials"]["smtp"]["host"] == "ssl0.ovh.net"
         assert appels == [True]
+
+
+# --------------------------------------------------------------------------
+# Le parcours complet — l'adhésion vient de HelloAsso
+# --------------------------------------------------------------------------
+
+def item_helloasso(email, quand, questions=None):
+    return {
+        "payer": {"email": email},
+        "user": {"firstName": "Hugo", "lastName": "L"},
+        "order": {"date": quand},
+        "state": "Processed",
+        "customFields": questions or [],
+    }
+
+
+class FauxHelloAsso:
+    def __init__(self, items, details=None):
+        self.items = items
+        self.details = ({"formType": "Membership", "formSlug": "bac-a-sable"}
+                        if details is None else details)
+
+    def __call__(self, **_):
+        return self
+
+    def get_form_details(self, titre):
+        return self.details
+
+    def get_form_items(self, form_type, form_slug):
+        return self.items
+
+
+@pytest.fixture
+def helloasso(monkeypatch):
+    monkeypatch.setenv("HELLOASSO_CLIENT_ID", "id")
+    monkeypatch.setenv("HELLOASSO_CLIENT_SECRET", "secret")
+
+    def brancher(items, details=None):
+        faux = FauxHelloAsso(items, details)
+        monkeypatch.setattr("src.clients.hello_asso_client.HelloAssoClient", faux)
+        return faux
+
+    return brancher
+
+
+CONF_HA = dict(CONF, helloAsso=dict(CONF["helloAsso"], organization_name="org"))
+
+
+class TestComplet:
+    def test_la_plus_recente_est_retenue(self, helloasso, capsys):
+        helloasso([item_helloasso("a@x.fr", "2026-08-01T10:00:00+02:00"),
+                   item_helloasso("b@x.fr", "2026-08-28T10:00:00+02:00")])
+
+        item = parcours.item_depuis_helloasso(CONF_HA, cibles())
+
+        assert item["payer"]["email"] == "parcours-1@example.org"
+        assert item["order"]["date"].startswith("2026-08-28")
+
+    def test_l_adresse_du_payeur_ne_traverse_jamais(self, helloasso):
+        """C'est le point de sécurité : le payeur d'une vraie soumission est une
+        vraie personne, et le bac à sable n'accepte pas son adresse."""
+        helloasso([item_helloasso("hugo@dsi.coop", "2026-08-28T10:00:00+02:00")])
+
+        item = parcours.item_depuis_helloasso(CONF_HA, cibles())
+
+        assert item["payer"]["email"] == "parcours-1@example.org"
+
+    def test_filtre_sur_le_payeur(self, helloasso):
+        helloasso([item_helloasso("a@x.fr", "2026-08-28T10:00:00+02:00"),
+                   item_helloasso("b@x.fr", "2026-08-27T10:00:00+02:00")])
+
+        item = parcours.item_depuis_helloasso(CONF_HA, cibles(), depuis="B@X.FR")
+
+        assert item["order"]["date"].startswith("2026-08-27")
+
+    def test_le_formulaire_de_production_est_refuse(self, helloasso):
+        """Le lire rejouerait de vraies adhésions, adresses comprises, dans le
+        bac à sable."""
+        helloasso([item_helloasso("a@x.fr", "2026-08-28T10:00:00+02:00")])
+
+        with pytest.raises(SystemExit) as e:
+            parcours.item_depuis_helloasso(
+                CONF_HA, cibles(formulaire="Adhésion année 2026"))
+        assert "PRODUCTION" in str(e.value)
+
+    def test_formulaire_introuvable_le_dit(self, helloasso):
+        helloasso([], details={})
+        with pytest.raises(SystemExit) as e:
+            parcours.item_depuis_helloasso(CONF_HA, cibles())
+        assert "introuvable" in str(e.value)
+
+    def test_aucune_adhesion_demande_de_remplir_le_formulaire(self, helloasso):
+        helloasso([])
+        with pytest.raises(SystemExit) as e:
+            parcours.item_depuis_helloasso(CONF_HA, cibles())
+        assert "Remplir le formulaire" in str(e.value)
+
+    def test_la_capture_ne_porte_pas_l_adresse_du_payeur(self, helloasso, tmp_path):
+        """Un item capturé vit dans scripts/data/ et peut être rejoué des mois
+        plus tard : il ne doit pas garder l'adresse de qui a rempli le
+        formulaire."""
+        import json
+        helloasso([item_helloasso("hugo@dsi.coop", "2026-08-28T10:00:00+02:00")])
+        fichier = tmp_path / "item.json"
+
+        parcours.item_depuis_helloasso(CONF_HA, cibles(), capture=str(fichier))
+
+        garde = json.loads(fichier.read_text(encoding="utf-8"))
+        assert "dsi.coop" not in fichier.read_text(encoding="utf-8")
+        assert garde["payer"]["email"].endswith("@example.org")
+
+    def test_les_libelles_reels_traversent(self, helloasso, capsys):
+        """Ce que le parcours complet apporte, et que l'item synthétique ne peut
+        pas apporter : les libellés viennent du formulaire, pas du mappage."""
+        helloasso([item_helloasso(
+            "a@x.fr", "2026-08-28T10:00:00+02:00",
+            [{"name": "Question que le code ignore", "answer": "Oui"}])])
+
+        item = parcours.item_depuis_helloasso(CONF_HA, cibles())
+        parcours.etape_adhesion(item, CONF)
+
+        assert "que le code ne lit pas" in capsys.readouterr().out

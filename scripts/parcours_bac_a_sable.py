@@ -87,6 +87,12 @@ _spec.loader.exec_module(bac)
 # ne se confondent pas. Le domaine est réservé RFC 2606, sans MX.
 MODELE_ADRESSE = "parcours-%s@example.org"
 
+# Adresse servant à prouver que la ceinture tient encore. Elle a la forme d'une
+# adresse d'adhérent, au domaine réel de l'association : c'est la seule question
+# qui compte, « peut-on joindre un adhérent depuis ici ? », et la réponse doit
+# être non même quand une adresse de contrôle est déclarée.
+ADRESSE_TEMOIN_REFUS = "adherent-temoin@coopdescommuns.org"
+
 # Expéditeur du bac à sable. Le même raisonnement que pour les destinataires :
 # un domaine réservé RFC 2606 ne peut ni émettre ni recevoir.
 EXPEDITEUR_BAC_A_SABLE = "bac-a-sable@example.org"
@@ -167,6 +173,80 @@ def item_depuis_fichier(chemin, adresse):
     return item
 
 
+def item_depuis_helloasso(conf, cibles, depuis=None, capture=None):
+    """Va chercher chez HelloAsso l'adhésion qui vient d'être saisie à la main.
+
+    C'est la seule variante qui prouve la chaîne **entière**, appel à HelloAsso
+    compris, et surtout la seule qui prouve que les **libellés du formulaire
+    rencontrent le code** : l'item synthétique, lui, est construit sur les
+    libellés que le code déclare lire, donc il ne peut pas voir le défaut qui a
+    fait perdre 84 consentements.
+
+    En échange elle demande un geste manuel, et elle n'est donc pas celle qu'on
+    lance dix fois par jour.
+    """
+    from src.clients.hello_asso_client import HelloAssoClient
+
+    hello_asso = conf.get("helloAsso", {})
+    organisation = os.getenv("HELLOASSO_ORGANIZATION") or hello_asso.get("organization_name")
+    if not (os.getenv("HELLOASSO_CLIENT_ID") and os.getenv("HELLOASSO_CLIENT_SECRET")):
+        sys.exit("HELLOASSO_CLIENT_ID / HELLOASSO_CLIENT_SECRET absents du .env.")
+
+    client = HelloAssoClient(
+        api_url=hello_asso.get("api_url", "https://api.helloasso.com"),
+        organization_name=organisation,
+        client_id=os.getenv("HELLOASSO_CLIENT_ID"),
+        client_secret=os.getenv("HELLOASSO_CLIENT_SECRET"),
+    )
+
+    details = client.get_form_details(cibles["formulaire"])
+    if not details:
+        sys.exit("Formulaire « %s » introuvable chez HelloAsso. Le titre doit être exact, et "
+                 "la campagne publiée — une campagne non publiée ne rend pas sa définition."
+                 % cibles["formulaire"])
+
+    # La ceinture vaut ici aussi : aller lire le formulaire de production
+    # rejouerait de vraies adhésions dans le bac à sable, adresses comprises.
+    if cibles["formulaire_production"] and \
+            cibles["formulaire"] == cibles["formulaire_production"]:
+        sys.exit("REFUS : « %s » est le formulaire de PRODUCTION. Le parcours complet ne se "
+                 "joue que sur le formulaire de test." % cibles["formulaire"])
+
+    items = client.get_form_items(details["formType"], details["formSlug"])
+    if not items:
+        sys.exit("Aucune adhésion sur « %s ». Remplir le formulaire, puis relancer."
+                 % cibles["formulaire"])
+
+    if depuis:
+        items = [i for i in items
+                 if (i.get("payer", {}).get("email") or "").lower() == depuis.lower()]
+        if not items:
+            sys.exit("Aucune adhésion payée par %s sur ce formulaire." % depuis)
+
+    items.sort(key=lambda i: i.get("order", {}).get("date", ""), reverse=True)
+    item = copy.deepcopy(items[0])
+
+    paye_par = item.get("payer", {}).get("email", "")
+    debut, _, domaine = paye_par.partition("@")
+    print("   ·  %d adhésion(s) sur « %s », la plus récente retenue"
+          % (len(items), cibles["formulaire"]))
+    print("   ·  %s, payée par %s…@%s"
+          % (item.get("order", {}).get("date", "date inconnue"), debut[:2], domaine))
+
+    if capture:
+        # L'adresse est remplacée **avant** l'écriture : un item capturé ne doit
+        # jamais porter sur disque l'adresse de qui a rempli le formulaire.
+        garde = copy.deepcopy(item)
+        garde.setdefault("payer", {})["email"] = MODELE_ADRESSE % "capture"
+        Path(capture).write_text(json.dumps(garde, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+        print("   ·  item capturé dans %s (adresse remplacée) — rejouable avec --item"
+              % capture)
+
+    item.setdefault("payer", {})["email"] = cibles["adresse"]
+    return item
+
+
 # --------------------------------------------------------------------------
 # La ceinture
 # --------------------------------------------------------------------------
@@ -201,11 +281,27 @@ def controler_cibles(cibles, client_ovh):
     print("   ✅ liste de diffusion %s (production : %s)"
           % (cibles["liste"], cibles["liste_production"] or "inconnue"))
 
-    if not cibles["adresse"].lower().endswith(bac.DOMAINES_FICTIFS):
-        print("   ❌ l'adresse du parcours (%s) n'est pas à un domaine réservé RFC 2606"
+    if cibles["adresse"].lower() in cibles["controle"]:
+        # La brèche est ouverte, et elle se dit. Un parcours qui livrerait
+        # vraiment sans l'annoncer serait le contraire d'un bac à sable.
+        autorise, refus = garde_fou_envoi.verifier([cibles["adresse"]])
+        if not autorise:
+            print("   ❌ adresse de contrôle %s déclarée, mais refusée par le garde-fou :"
+                  % cibles["adresse"])
+            print("      %s" % refus)
+            return 1
+        print("   ⚠  adresse de contrôle %s — elle PEUT recevoir." % cibles["adresse"])
+        print("      L'invariant « aucune adresse réelle dans le bac à sable » est ouvert")
+        print("      pour elle seule, le temps de prouver la livraison. Le contrôle")
+        print("      `bac_a_sable.py verifier` la nommera tant qu'elle sera en base :")
+        print("      la déclarer aussi dans ADRESSES_DE_CONTROLE.")
+    elif not cibles["adresse"].lower().endswith(bac.DOMAINES_FICTIFS):
+        print("   ❌ l'adresse du parcours (%s) n'est pas à un domaine réservé RFC 2606,"
               % cibles["adresse"])
+        print("      et n'est pas déclarée dans ADRESSES_DE_CONTROLE.")
         return 1
-    print("   ✅ adresse %s — domaine réservé, sans MX" % cibles["adresse"])
+    else:
+        print("   ✅ adresse %s — domaine réservé, sans MX" % cibles["adresse"])
 
     # Les droits réels de la clé OVH. `/auth/currentCredential` répond même
     # quand tout le reste est refusé : c'est ce qui dissout un NotGrantedCall au
@@ -275,8 +371,6 @@ def etape_adhesion(item, conf):
     """L'item devient une adhésion, l'adhésion devient un payload Airtable."""
     from src.models import UserSubscription
 
-    print()
-    print("3. L'adhésion")
     hello_asso = conf.get("helloAsso", {})
     adhesion = UserSubscription.from_hello_asso_item(
         item,
@@ -504,13 +598,18 @@ def etape_liste(client_ovh, cibles, adresse, fiche):
     return 0
 
 
-def etape_mail(client_email, conf, prenom, adresse, chemin_rendu=None):
-    """Le mail de bienvenue est-il rendu, et le garde-fou refuse-t-il de l'envoyer ?
+def etape_mail(client_email, conf, prenom, adresse, compteurs=None, livraison=False,
+               chemin_rendu=None):
+    """Le mail de bienvenue est-il rendu, part-il vraiment, et la ceinture tient-elle ?
 
-    Deux contrôles en un, et le second est le critère de recette du bac à
-    sable : « aucune adresse d'adhérent réel ne peut être jointe » ne se prouve
-    pas en lisant la configuration, mais en tentant un envoi et en constatant le
-    refus.
+    La livraison n'est **pas** provoquée ici : elle a lieu à l'étape 4, dans
+    `sync_subscriptions`, par le même chemin que le cron de production. Un envoi
+    déclenché à part prouverait qu'on sait envoyer un mail, pas que la chaîne
+    d'adhésion en envoie un.
+
+    Le dernier contrôle est le critère de recette du bac à sable, et il reste
+    vrai même quand une adresse de contrôle est déclarée : une adresse
+    d'adhérent, au domaine réel de l'association, doit être refusée.
     """
     print()
     print("7. Le mail de bienvenue")
@@ -541,6 +640,25 @@ def etape_mail(client_email, conf, prenom, adresse, chemin_rendu=None):
         print("      ⚠ ce fichier porte le bloc de signature, donc des données")
         print("        personnelles : il ne va pas dans un dépôt.")
 
+    if livraison:
+        if compteurs is None:
+            print("   ⚠  livraison demandée mais l'étape Airtable n'a pas eu lieu :")
+            print("      rien n'a été envoyé.")
+        elif compteurs.get("erreurs"):
+            print("   ❌ le mail n'est pas parti (erreurs=%s à l'étape 4). Détail en syslog :"
+                  % compteurs["erreurs"])
+            print("      journalctl -t hello_asso_sync, ou la sortie DEBUG ci-dessus.")
+            ecarts += 1
+        elif not compteurs.get("traitées"):
+            print("   ⚠  aucune adhésion traitée : aucun mail n'avait à partir.")
+        else:
+            print("   ✅ mail réellement envoyé à %s par la chaîne d'adhésion elle-même," % adresse)
+            print("      pas par un envoi écrit pour l'occasion. Expéditeur et signature")
+            print("      sont ceux de la production : c'est le mail que reçoit un adhérent.")
+            print("      → aller le lire. S'il n'arrive pas, regarder les indésirables avant")
+            print("        de conclure : l'expéditeur et le destinataire ne sont pas du même")
+            print("        domaine.")
+
     if not client_email:
         print("   ⚠  pas de client d'envoi configuré (conf.ovh.email absent) :")
         print("      le refus du garde-fou n'a pas pu être éprouvé.")
@@ -548,20 +666,20 @@ def etape_mail(client_email, conf, prenom, adresse, chemin_rendu=None):
 
     envoye = client_email.send_email(
         sender=conf.get("ovh", {}).get("email", {}).get("from", EXPEDITEUR_BAC_A_SABLE),
-        to=[adresse],
+        to=[ADRESSE_TEMOIN_REFUS],
         subject=welcome_email.SUBJECT,
         body_text=texte,
         body_html=html,
         dry_run=True,
     )
     if envoye:
-        print("   ❌ le garde-fou a laissé passer un envoi vers %s." % adresse)
-        print("      C'est la ceinture qui est en cause, pas ce parcours : hors")
-        print("      production, aucune adresse absente de DESTINATAIRES_AUTORISES")
-        print("      ne doit être joignable, même en simulation.")
+        print("   ❌ le garde-fou a laissé passer un envoi vers %s." % ADRESSE_TEMOIN_REFUS)
+        print("      Une adresse d'adhérent est joignable depuis cet environnement :")
+        print("      c'est la ceinture qui est en cause, et c'est le critère de recette")
+        print("      du bac à sable qui tombe.")
         ecarts += 1
     else:
-        print("   ✅ envoi refusé par le garde-fou — le bac à sable ne peut joindre personne")
+        print("   ✅ envoi vers une adresse d'adhérent (%s) refusé" % ADRESSE_TEMOIN_REFUS)
     return ecarts
 
 
@@ -630,7 +748,7 @@ class SyncBacASable(SyncHelloAsso):
         super()._init_clients()
 
 
-def _conf_bac_a_sable(chemin, cibles):
+def _conf_bac_a_sable(chemin, cibles, expediteur=None):
     """La configuration de production, ses cibles remplacées par celles du bac à sable.
 
     Le comportement est recopié tel quel — champs liés, champs calculés,
@@ -653,7 +771,11 @@ def _conf_bac_a_sable(chemin, cibles):
     # doit pouvoir se réclamer ni de l'association, ni d'une personne. Domaine
     # réservé, donc sans MX, donc sans retour possible non plus.
     conf["ovh"].setdefault("email", {})
-    conf["ovh"]["email"]["from"] = EXPEDITEUR_BAC_A_SABLE
+    # En mode livraison, l'expéditeur doit être la boîte authentifiée auprès du
+    # relais SMTP : OVH refuse un `From` qui n'est pas la sienne. Prouver qu'un
+    # mail arrive impose donc de l'émettre depuis l'adresse de production, avec
+    # sa signature. C'est le prix de la démonstration, et il se dit.
+    conf["ovh"]["email"]["from"] = expediteur or EXPEDITEUR_BAC_A_SABLE
     conf["ovh"]["email"].setdefault("subject", welcome_email.SUBJECT)
     conf["ovh"]["email"]["send_confirmation"] = True
     conf.setdefault("helloAsso", {})["form_name"] = cibles["formulaire"]
@@ -671,15 +793,28 @@ def _cibles(args, conf_locale):
     if not domaine:
         sys.exit("Domaine de la liste inconnu : --domaine, OVH_MAILING_LIST_DOMAIN, "
                  "ou le config JSON.")
+    # Une adresse de contrôle déclarée devient l'adresse de l'adhésion : le mail
+    # de bienvenue part à l'adresse de l'adhérent, pas ailleurs. Prouver la
+    # livraison suppose donc que l'adhérent, ce soit vous.
+    controle = bac.adresses_de_controle(
+        [args.adresse_de_controle] if args.adresse_de_controle else None)
+    if args.adresse_de_controle and not controle:
+        sys.exit("Adresse de contrôle invalide : il faut une adresse nominative, pas un motif.")
+    adresse = (args.adresse
+               or (args.adresse_de_controle.strip().lower() if args.adresse_de_controle else None)
+               or MODELE_ADRESSE % datetime.now().strftime("%Y%m%d-%H%M%S"))
+
     return {
         "base": base,
         "base_production": os.getenv("AIRTABLE_BASE_ID_PROD"),
         "liste": liste,
         "liste_production": conf_locale.get("ovh", {}).get("mailing_list", {}).get("name"),
         "domaine": domaine,
-        "adresse": args.adresse or MODELE_ADRESSE % datetime.now().strftime("%Y%m%d-%H%M%S"),
+        "adresse": adresse,
+        "controle": controle,
         "formulaire": (args.formulaire or os.getenv("HELLOASSO_FORM_BAC_A_SABLE")
                        or "Bac à sable adhésion test"),
+        "formulaire_production": conf_locale.get("helloAsso", {}).get("form_name"),
         "jeton_airtable_dedie": bool(os.getenv("AIRTABLE_API_KEY_BAC_A_SABLE")),
     }
 
@@ -724,7 +859,9 @@ def parcours(args):
     conf_locale = bac._conf_locale(args.config)
     cibles = _cibles(args, conf_locale)
     credentials = _credentials(cibles)
-    conf = _conf_bac_a_sable(args.config, cibles)
+    livraison = bool(args.adresse_de_controle)
+    expediteur = args.expediteur or (os.getenv("SMTP_USER") if livraison else None)
+    conf = _conf_bac_a_sable(args.config, cibles, expediteur)
 
     import ovh as ovh_api
     client_ovh = ovh_api.Client(endpoint=credentials["ovh"]["endpoint"],
@@ -732,8 +869,15 @@ def parcours(args):
                                 application_secret=credentials["ovh"]["as"],
                                 consumer_key=credentials["ovh"]["ck"])
 
-    print("parcours d'adhésion — bac à sable")
+    print("parcours d'adhésion — bac à sable%s"
+          % (" — COMPLET, avec livraison réelle" if livraison and args.complet
+             else " — COMPLET" if args.complet
+             else " — livraison réelle" if livraison else ""))
     print()
+    if livraison and not args.appliquer:
+        print("⚠  --adresse-de-controle sans --appliquer : rien n'est écrit, donc aucun")
+        print("   mail n'est envoyé. Ajouter --appliquer pour la livraison.")
+        print()
     ecarts = controler_cibles(cibles, client_ovh)
     if ecarts:
         print()
@@ -742,9 +886,20 @@ def parcours(args):
     ecarts += controler_configuration(conf)
 
     at = bac.Airtable(credentials["airtable"]["api_key"])
-    genres = _genres(credentials["airtable"]["api_key"], cibles["base"]) if not args.item else []
-    item = (item_depuis_fichier(args.item, cibles["adresse"]) if args.item
-            else item_synthetique(cibles["adresse"], genres))
+
+    print()
+    print("3. L'adhésion")
+    if args.item:
+        item = item_depuis_fichier(args.item, cibles["adresse"])
+        print("   ·  item rejoué depuis %s" % args.item)
+    elif args.complet:
+        item = item_depuis_helloasso(conf, cibles, args.depuis, args.capturer)
+    else:
+        item = item_synthetique(
+            cibles["adresse"], _genres(credentials["airtable"]["api_key"], cibles["base"]))
+        print("   ·  item synthétique, construit sur les libellés que le code déclare lire :")
+        print("      il ne peut donc pas voir un libellé de formulaire qui ne rencontre")
+        print("      rien. Pour ça, --complet ou bac_a_sable.py formulaire.")
 
     adhesion, payload = etape_adhesion(item, conf)
 
@@ -772,7 +927,10 @@ def parcours(args):
             ecarts += etape_groupe(at, fiche, conf, cibles)
             ecarts += etape_liste(client_ovh, cibles, cibles["adresse"], fiche)
         ecarts += etape_mail(sync.ovh_email_client, conf, adhesion.first_name,
-                             cibles["adresse"], args.rendu)
+                             cibles["adresse"],
+                             compteurs=sync._compteurs if args.appliquer else None,
+                             livraison=livraison and args.appliquer,
+                             chemin_rendu=args.rendu)
         if args.appliquer:
             etape_menage(sync, client_ovh, cibles, fiche, cibles["adresse"], args.garder)
     finally:
@@ -801,6 +959,23 @@ def main():
     p.add_argument("--adresse", help="adresse du parcours (défaut : horodatée, en @example.org)")
     p.add_argument("--item", help="item HelloAsso capturé (JSON) à rejouer, plutôt qu'un "
                                   "item synthétique construit sur le mapping")
+    p.add_argument("--complet", action="store_true",
+                   help="aller chercher chez HelloAsso l'adhésion que vous venez de saisir "
+                        "sur le formulaire de test : la chaîne entière, appel à HelloAsso "
+                        "et libellés réels compris")
+    p.add_argument("--depuis", metavar="ADRESSE",
+                   help="complet : choisir l'adhésion payée par cette adresse "
+                        "(défaut : la plus récente)")
+    p.add_argument("--capturer", metavar="FICHIER",
+                   help="complet : enregistrer l'item récupéré (adresse remplacée) pour le "
+                        "rejouer ensuite avec --item")
+    p.add_argument("--adresse-de-controle", metavar="ADRESSE",
+                   help="livrer vraiment le mail de bienvenue à cette adresse, qui devient "
+                        "celle de l'adhésion. Ouvre une exception nominative aux deux "
+                        "invariants du bac à sable, et la commande le dit à chaque passage.")
+    p.add_argument("--expediteur",
+                   help="expéditeur du mail (défaut : SMTP_USER en livraison, sinon une "
+                        "adresse en @example.org)")
     p.add_argument("--rendu", help="écrire le mail de bienvenue rendu dans ce fichier HTML")
     p.add_argument("--base", help="base Airtable du bac à sable "
                                   "(défaut : AIRTABLE_BASE_ID_BAC_A_SABLE)")
