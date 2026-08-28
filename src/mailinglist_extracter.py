@@ -259,13 +259,46 @@ class CheckOvhMailinglist:
             if normaliser_email(email) not in connus_airtable:
                 print("delete " + email + (" from " + label if label else ""))
                 self._compteurs["suppressions"] += 1
-                self.DeleteOvhMailinglistSubscriber(mailing_list, email)
+                self._appel_par_abonne(
+                    self.DeleteOvhMailinglistSubscriber, mailing_list, email,
+                    "delete", label)
 
         for email in airtable_subscribers:
             if normaliser_email(email) not in connus_ovh:
                 print("add " + email + (" in " + label if label else ""))
                 self._compteurs["ajouts"] += 1
-                self.AddOvhMailingListSubscriber(mailing_list, email)
+                self._appel_par_abonne(
+                    self.AddOvhMailingListSubscriber, mailing_list, email,
+                    "add", label)
+
+    def _appel_par_abonne(self, operation, mailing_list, email, quoi, label):
+        """Un abonné refusé n'emporte pas les autres.
+
+        Le 27/08/2026, une adresse saisie avec une espace finale dans Airtable a
+        fait échouer l'appel OVH, qui remontait jusqu'à la boucle des 24 listes :
+        **la donnée d'une seule personne privait toutes les autres de
+        synchronisation**, chaque nuit, et la sentinelle passait en alerte sans
+        que personne ne fasse le lien.
+
+        L'adresse est aussi **débarrassée de ses espaces avant l'appel**. Une
+        espace n'appartient pas à une adresse : la comparaison l'ignorait déjà,
+        l'appel OVH non. La corriger dans Airtable resterait à faire, mais la
+        corriger ici ferme la classe entière — la prochaine espace en trop ne
+        cassera rien.
+
+        La casse, elle, n'est **pas** touchée : on compare en minuscules, on
+        n'écrit pas en minuscules. Les adresses transmises à OVH restent celles
+        reçues d'Airtable.
+        """
+        propre = email.strip() if isinstance(email, str) else email
+        try:
+            operation(mailing_list, propre)
+        except Exception as e:
+            self._compteurs["erreurs"] += 1
+            msg = ("{} {} on {} refused by OVH ({}) — other subscribers are still "
+                   "processed".format(quoi, propre, label or mailing_list, e))
+            syslog.syslog(syslog.LOG_ERR, msg)
+            print("ERROR: " + msg, file=sys.stderr)
 
     def SyncMailingList(self):
 

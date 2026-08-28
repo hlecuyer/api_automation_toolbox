@@ -124,18 +124,29 @@ class ListeFactice:
         # ReconcileSubscribers compte les appels OVH réellement émis : c'est de
         # là que sort la ligne de vie du passage.
         self._compteurs = dict(CheckOvhMailinglist.COMPTEURS_NEUFS)
+        # La vraie protection par abonné, pas une imitation : c'est elle qui
+        # décide qu'un refus n'emporte pas les autres.
+        self._appel_par_abonne = CheckOvhMailinglist._appel_par_abonne.__get__(self)
+        self.refuse = set()
+
+    def _peut_etre_refuse(self, email):
+        if email in self.refuse:
+            raise RuntimeError("OVH refuse %s" % email)
 
     def DeleteOvhMailinglistSubscriber(self, mailing_list, email):
+        self._peut_etre_refuse(email)
         self.supprimes.append(email)
 
     def AddOvhMailingListSubscriber(self, mailing_list, email):
+        self._peut_etre_refuse(email)
         self.ajoutes.append(email)
 
 
-def reconcilier(airtable, ovh, label=""):
+def reconcilier(airtable, ovh, label="", refuse=()):
     from src.mailinglist_extracter import CheckOvhMailinglist
 
     faux = ListeFactice()
+    faux.refuse = set(refuse)
     CheckOvhMailinglist.ReconcileSubscribers(faux, {}, airtable, ovh, label)
     return faux
 
@@ -199,3 +210,51 @@ def test_normaliser_email(entree, attendu):
 
 def test_normaliser_email_laisse_passer_ce_qui_n_est_pas_une_chaine():
     assert normaliser_email(None) is None
+
+
+# --------------------------------------------------------------------------
+# Un abonné refusé n'emporte pas les autres
+# --------------------------------------------------------------------------
+#
+# Le 27/08/2026 à 16h37, une adresse saisie avec une espace finale dans Airtable
+# a fait échouer l'appel OVH. L'exception remontait jusqu'à la boucle des 24
+# listes : la donnée d'une seule personne privait toutes les autres de
+# synchronisation, chaque nuit, et la sentinelle healthchecks passait en alerte
+# sans que personne ne fasse le lien.
+
+def test_un_ajout_refuse_n_arrete_pas_les_suivants():
+    resultat = reconcilier(["a@x.fr", "refuse@x.fr", "c@x.fr"], [],
+                           refuse={"refuse@x.fr"})
+
+    assert resultat.ajoutes == ["a@x.fr", "c@x.fr"]
+    assert resultat._compteurs["erreurs"] == 1
+
+
+def test_une_suppression_refusee_n_arrete_pas_les_suivantes():
+    resultat = reconcilier([], ["a@x.fr", "refuse@x.fr", "c@x.fr"],
+                           refuse={"refuse@x.fr"})
+
+    assert resultat.supprimes == ["a@x.fr", "c@x.fr"]
+    assert resultat._compteurs["erreurs"] == 1
+
+
+def test_le_refus_est_compte_sans_masquer_l_intention():
+    """Le compteur d'ajouts dit ce qu'on a voulu faire, celui d'erreurs ce qui
+    n'a pas abouti. Confondre les deux effacerait la trace de la tentative."""
+    resultat = reconcilier(["refuse@x.fr"], [], refuse={"refuse@x.fr"})
+
+    assert resultat._compteurs["ajouts"] == 1
+    assert resultat._compteurs["erreurs"] == 1
+
+
+def test_l_espace_parasite_ne_part_plus_chez_ovh():
+    """La cause du 27/08. Airtable garde l'espace, OVH ne la voit plus."""
+    resultat = reconcilier(["eric@orange.fr "], [])
+    assert resultat.ajoutes == ["eric@orange.fr"]
+
+
+def test_la_casse_reste_intacte_malgre_le_nettoyage():
+    """On enlève les espaces, pas la casse : on compare en minuscules, on
+    n'écrit pas en minuscules."""
+    resultat = reconcilier([" Nouveau.Contact@x.fr "], [])
+    assert resultat.ajoutes == ["Nouveau.Contact@x.fr"]
