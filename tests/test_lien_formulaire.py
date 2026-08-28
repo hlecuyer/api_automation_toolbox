@@ -34,6 +34,17 @@ class TestUrl:
         assert url(BASE, FORM, fiche()).startswith(
             "https://airtable.com/appBAC/shrFORM?")
 
+    def test_une_adresse_complete_est_reprise_telle_quelle(self):
+        """Le constructeur récent d'Airtable donne une adresse en `pagXXX`, pas
+        un `shrXXX`. On colle ce que donne le bouton « Partager » plutôt que
+        d'aller deviner un identifiant."""
+        collee = "https://airtable.com/appAUTRE/pag45WWd/form"
+        assert url(BASE, collee, fiche()).startswith(collee + "?")
+
+    def test_une_adresse_collee_avec_ses_parametres_est_nettoyee(self):
+        assert url(BASE, "https://airtable.com/appX/pagY/form?deja=1",
+                   fiche()).count("?") == 1
+
     def test_une_valeur_est_preremplie_sous_sa_question(self):
         p = parametres(url(BASE, FORM, fiche(Prénom="Prosper")))
         assert p["prefill_Quel est votre prénom ?"] == "Prosper"

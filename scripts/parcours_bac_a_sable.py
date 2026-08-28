@@ -709,6 +709,12 @@ CORRECTIONS = {
 }
 
 
+# Le parcours s'est arrêté sur le formulaire : il attend une validation humaine.
+# Ce n'est ni une réussite ni un écart, et surtout ce n'est pas le moment de
+# faire le ménage — la fiche doit rester pour être corrigée.
+EN_ATTENTE = "en-attente-de-validation"
+
+
 def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
     """Le vrai formulaire, rempli par Hugo, dans son navigateur.
 
@@ -724,11 +730,13 @@ def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
     print()
     print("      %s" % lien)
     print()
-    try:
-        input("   Entrée quand le formulaire est validé — ")
-    except EOFError:
-        print("   ❌ pas de terminal pour attendre la validation")
-        return None
+    if not sys.stdin.isatty():
+        # Sans terminal, personne ne peut valider le formulaire pendant que le
+        # script attend. On rend la main en gardant tout en place plutôt que de
+        # faire échouer l'étape : la fiche et l'abonnement restent, et le
+        # parcours se termine par ce qu'il reste à faire.
+        return EN_ATTENTE
+    input("   Entrée quand le formulaire est validé — ")
 
     trouvees = reponses.list_records(
         filter_by_formula="{%s}='%s'" % (CHAMP_FICHE, fiche["id"]))
@@ -764,6 +772,8 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):
 
     if formulaire:
         depose = _reponse_par_formulaire(reponses, cibles, fiche, formulaire)
+        if depose is EN_ATTENTE:
+            return 0, EN_ATTENTE
         if not depose:
             return 1, None
         print("   ✅ réponse reçue du formulaire — %s, désignant la fiche %s"
@@ -820,6 +830,15 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):
         print("      sans conséquence puisque les valeurs sont les mêmes")
 
     return ecarts, (reponses, depose["id"])
+
+
+def _attente(fiche, cibles):
+    """Ce qu'il reste à faire quand le parcours s'arrête sur le formulaire."""
+    print()
+    print("→ le parcours attend ta validation. Rien n'a été nettoyé :")
+    print("   ·  fiche      %s" % fiche["id"])
+    print("   ·  adresse    %s" % cibles["adresse"])
+    print("   Une fois le formulaire validé, la réconciliation reprend depuis là.")
 
 
 def etape_menage(sync, client_ovh, cibles, fiche, adresse, garder, reponse=None):
@@ -1083,6 +1102,9 @@ def parcours(args):
             e, reponse = etape_mise_a_jour(sync, credentials, cibles, fiche, conf,
                                            args.maj_formulaire)
             ecarts += e
+            if reponse is EN_ATTENTE:
+                _attente(fiche, cibles)
+                return 0
             etape_menage(sync, client_ovh, cibles, fiche, cibles["adresse"], args.garder,
                          reponse)
     finally:

@@ -44,12 +44,27 @@ def _identifiants(valeurs):
     return all(isinstance(v, str) and v.startswith(PREFIXE_IDENTIFIANT) for v in valeurs)
 
 
+def racine(base, formulaire):
+    """L'adresse du formulaire, avant les paramètres.
+
+    Airtable a deux générations de formulaires : la vue formulaire classique,
+    partagée en `airtable.com/appXXX/shrXXX`, et le constructeur récent, dont
+    l'adresse porte un `pagXXX`. Plutôt que de deviner laquelle, on accepte
+    aussi bien un identifiant qu'une adresse complète collée depuis le bouton
+    « Partager » — c'est ce qu'on a sous la main quand on teste.
+    """
+    if formulaire.startswith("http"):
+        return formulaire.split("?")[0].rstrip("/")
+    return "%s/%s/%s" % (RACINE, base, formulaire)
+
+
 def url(base, formulaire, fiche, liens=None):
     """Le lien prérempli pour une fiche.
 
     Args:
         base: identifiant de la base (`appXXX`).
-        formulaire: identifiant du formulaire (`shrXXX`).
+        formulaire: identifiant du formulaire (`shrXXX`), ou son adresse
+            complète.
         fiche: l'enregistrement de l'`Annuaire`, tel que l'API le rend.
         liens: noms lisibles des colonnes liées, `{colonne: [noms]}`. Sans eux,
             ces colonnes ne sont pas préremplies — un `recXXX` dans un champ de
@@ -70,7 +85,7 @@ def url(base, formulaire, fiche, liens=None):
             valeur = ",".join(str(v) for v in valeur)
         params.append(("prefill_" + libelle, str(valeur)))
 
-    return "%s/%s/%s?%s" % (RACINE, base, formulaire, urllib.parse.urlencode(params))
+    return "%s?%s" % (racine(base, formulaire), urllib.parse.urlencode(params))
 
 
 def formule(base, formulaire):
@@ -81,8 +96,8 @@ def formule(base, formulaire):
     """
     encode = urllib.parse.quote
 
-    lignes = ['"%s/%s/%s?prefill_%s=" & RECORD_ID() & "&hide_%s=true"'
-              % (RACINE, base, formulaire, CHAMP_FICHE, CHAMP_FICHE)]
+    lignes = ['"%s?prefill_%s=" & RECORD_ID() & "&hide_%s=true"'
+              % (racine(base, formulaire), CHAMP_FICHE, CHAMP_FICHE)]
 
     for libelle, colonne, _ in CHAMPS_FORMULAIRE:
         valeur = "{%s}" % colonne
