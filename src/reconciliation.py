@@ -45,6 +45,66 @@ CHAMP_DATE_MAJ = "Fiche mise à jour le"
 
 CHAMPS_TECHNIQUES = (CHAMP_FICHE, CHAMP_SYNCHRONISE)
 
+# Le formulaire, dans l'ordre où il pose ses questions.
+#
+# `(libellé, colonne de l'Annuaire, explication)`.
+#
+# **Le libellé n'est pas le nom de la colonne, et c'est délibéré.** Un formulaire
+# Airtable affiche le nom du champ comme intitulé de question : « 2 personnes
+# connues », « code postal », « Partage de donnée autorisé » sont des noms de
+# colonnes tenus par une gestionnaire, pas des questions posées à un adhérent.
+#
+# Le prix de cette lisibilité est une correspondance à tenir, là où des noms
+# identiques n'en demandaient aucune. Elle est donc déclarée **ici et nulle part
+# ailleurs** : `scripts/creer_table_mise_a_jour.py` s'en sert pour poser les
+# champs, ce module pour les relire. Les deux ne peuvent pas diverger puisqu'ils
+# lisent la même liste, et le script vérifie à chaque passage que chaque colonne
+# visée existe bien dans l'Annuaire.
+#
+# L'explication devient la description du champ, affichée sous la question dans
+# le formulaire. Pour les deux consentements, c'est le libellé exact du
+# formulaire HelloAsso : même question, même formulation, rien qui change de sens
+# en changeant de support.
+CHAMPS_FORMULAIRE = [
+    ("Nom", "Nom", ""),
+    ("Prénom", "Prénom", ""),
+    ("Adresse e-mail", "E-mail",
+     "Celle à laquelle la Coop vous écrit."),
+    ("Autre adresse e-mail", "Mail optionnel",
+     "Facultatif. Une adresse de secours, si vous en avez une."),
+    ("Téléphone", "Téléphone", "Facultatif."),
+    ("Genre", "Genre", ""),
+    ("Date de naissance", "date de naissance", "Facultatif."),
+    ("Code postal", "code postal",
+     "Nous sert à savoir où se trouvent les adhérent·es, rien de plus."),
+    ("Votre structure", "Structure(s)",
+     "L'organisation dans laquelle vous travaillez ou que vous représentez. "
+     "Choisissez-la dans la liste ; si elle n'y est pas, laissez vide et "
+     "dites-le nous."),
+    ("Votre fonction dans cette structure", "Fonction (structure)", ""),
+    ("Vos centres d'intérêt", "Intérêts",
+     "Quelques mots-clés suffisent."),
+    ("Deux personnes que vous connaissez à la Coop", "2 personnes connues",
+     "Surtout utile s'il s'agit de votre première adhésion."),
+    ("Vous êtes plutôt", "Type", ""),
+    ("Année de votre première adhésion", "Année de première adhésion",
+     "Si vous ne vous en souvenez pas, laissez vide."),
+    ("Nom et prénom visibles sur le site", "Visible sur le site",
+     "Je souhaite que mon Nom et Prénom soient partagés sur le site web de "
+     "l'association dans la liste des adhérent·es."),
+    ("Informations partagées avec les autres adhérent·es", "Partage de donnée autorisé",
+     "Souhaitez-vous partager les informations précédentes avec les autres "
+     "adhérent·es de la Coop des Communs ? Pour information, les champs suivants "
+     "seront uniquement accessibles par l'équipe de gestion de l'association et "
+     "les prestataires missionnés."),
+]
+
+# Les deux consentements. Texte dans l'Annuaire, liste Oui/Non dans le
+# formulaire : on ne demande pas à un adhérent de taper « Oui » à la main.
+COLONNES_OUI_NON = ("Visible sur le site", "Partage de donnée autorisé")
+
+CORRESPONDANCE = {libelle: colonne for libelle, colonne, _ in CHAMPS_FORMULAIRE}
+
 
 def _valeur_utile(valeur):
     """Une réponse qui dit quelque chose. `False` en dit une, `''` non."""
@@ -58,17 +118,20 @@ def _valeur_utile(valeur):
 def payload_depuis_reponse(champs):
     """Ce qu'une réponse a réellement à dire à la fiche.
 
-    Le rapprochement est une **identité** : la table de réponses a été dérivée
-    du schéma de l'Annuaire, colonne par colonne, options comprises. Il n'y a
-    donc pas de table de correspondance à tenir, et donc pas de table de
-    correspondance qui puisse diverger. C'est tout l'intérêt d'avoir généré la
-    table plutôt que de l'avoir saisie.
+    Traduit les libellés du formulaire en noms de colonnes de l'Annuaire. Un
+    libellé inconnu est **ignoré** plutôt que recopié tel quel : quelqu'un qui
+    ajoute une question dans le formulaire sans la déclarer ici ne doit pas faire
+    échouer l'écriture entière des autres réponses — le code n'utilise pas
+    `typecast`, et une colonne inexistante suffirait.
     """
-    return {
-        nom: valeur
-        for nom, valeur in champs.items()
-        if nom not in CHAMPS_TECHNIQUES and _valeur_utile(valeur)
-    }
+    payload = {}
+    for libelle, valeur in champs.items():
+        if libelle in CHAMPS_TECHNIQUES or not _valeur_utile(valeur):
+            continue
+        colonne = CORRESPONDANCE.get(libelle)
+        if colonne:
+            payload[colonne] = valeur
+    return payload
 
 
 def _date_de(reponse):

@@ -66,8 +66,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src import garde_fou_envoi
-from src.reconciliation import (CHAMP_DATE_MAJ, CHAMP_FICHE,
-                                 CHAMP_SYNCHRONISE, Reconciliation)
+from src.reconciliation import (CHAMP_DATE_MAJ, CHAMP_FICHE, CHAMP_SYNCHRONISE,
+                                 CORRESPONDANCE, Reconciliation)
 from src.hello_asso_sync import SyncHelloAsso
 from src.models.user_subscription import (CHAMPS_BOOLEENS_AIRTABLE,
                                           CHAMPS_HELLOASSO_VERS_AIRTABLE)
@@ -698,7 +698,11 @@ TABLE_REPONSES = "Mise à jour fiche"
 # donc la classe de bug qui fait échouer l'écriture entière est fermée à la
 # source. Le référentiel reste appliqué à la réconciliation par précaution, et
 # c'est `tests/test_reconciliation.py` qui l'éprouve.
-CORRECTIONS = {"Fonction (structure)": "Fonction corrigée par l'adhérent",
+# Les clés sont les **libellés du formulaire**, pas les colonnes de l'Annuaire :
+# c'est ce que dépose une vraie soumission. La colonne visée se lit dans
+# CORRESPONDANCE, de sorte que renommer une question ne casse pas ce parcours en
+# silence.
+CORRECTIONS = {"Votre fonction dans cette structure": "Fonction corrigée par l'adhérent",
                "Genre": "Féminin"}
 
 
@@ -740,22 +744,14 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf):
     relue = sync.airtable_client.find_record_by_email(fiche["fields"].get("E-mail", ""))
     champs = (relue or {}).get("fields", {})
 
-    attendu = CORRECTIONS["Fonction (structure)"]
-    if champs.get("Fonction (structure)") == attendu:
-        print("   ✅ %-28s « %s »" % ("Fonction (structure)", attendu))
-    else:
-        print("   ❌ %-28s « %s », attendu « %s »"
-              % ("Fonction (structure)", champs.get("Fonction (structure)"), attendu))
-        ecarts += 1
-
-    if champs.get("Genre") == CORRECTIONS["Genre"]:
-        print("   ✅ %-28s corrigé en « %s » — valeur de liste fermée écrite sans"
-              % ("Genre", CORRECTIONS["Genre"]))
-        print("      typecast, donc reconnue par la base")
-    else:
-        print("   ❌ %-28s « %s », attendu « %s »"
-              % ("Genre", champs.get("Genre"), CORRECTIONS["Genre"]))
-        ecarts += 1
+    for libelle, attendu in CORRECTIONS.items():
+        colonne = CORRESPONDANCE[libelle]
+        if champs.get(colonne) == attendu:
+            print("   ✅ %-24s ← « %s »" % (colonne, libelle))
+        else:
+            print("   ❌ %-24s « %s », attendu « %s » (question « %s »)"
+                  % (colonne, champs.get(colonne), attendu, libelle))
+            ecarts += 1
 
     if champs.get(CHAMP_DATE_MAJ):
         print("   ✅ %-28s %s — l'adhérent ne sera plus relancé"

@@ -48,44 +48,15 @@ import sys
 import requests
 from dotenv import load_dotenv
 
+from src.reconciliation import (CHAMP_FICHE, CHAMP_SYNCHRONISE, CHAMPS_FORMULAIRE,
+                                COLONNES_OUI_NON)
+
 TABLE_CIBLE = "Mise à jour fiche"
 TABLE_SOURCE = "Annuaire"
 
-# Le champ technique qui rend la réconciliation exacte. Prérempli par l'URL et
-# masqué (`hide_record_id=true`), il désigne la fiche sans passer par un
-# rapprochement sur l'adresse — lequel raterait silencieusement les 7 fiches qui
-# portent plusieurs adresses dans « Mail optionnel ».
-CHAMP_FICHE = "record_id"
-
-# Le marqueur d'idempotence, repris de la table « Ajout à un groupe » qui porte
-# déjà ce motif dans cette base depuis 2022.
-CHAMP_SYNCHRONISE = "Synchronisé"
-
-# Les colonnes de l'`Annuaire` que l'adhérent voit et peut corriger, dans
-# l'ordre où le formulaire les posera. Chacune est reprise **avec son type et
-# ses options réels**, lus dans le schéma au moment de la création.
-CHAMPS_MIROIR = [
-    "Nom",
-    "Prénom",
-    "E-mail",
-    "Mail optionnel",
-    "Téléphone",
-    "Genre",
-    "date de naissance",
-    "code postal",
-    "Structure(s)",
-    "Fonction (structure)",
-    "Intérêts",
-    "2 personnes connues",
-    "Type",
-    "Année de première adhésion",
-]
-
-# Les deux consentements. Texte dans l'`Annuaire`, liste ici : voir l'en-tête.
-CHAMPS_OUI_NON = [
-    "Visible sur le site",
-    "Partage de donnée autorisé",
-]
+# Les libellés du formulaire, les colonnes qu'ils visent et leurs explications
+# sont déclarés dans `src/reconciliation.py` — le module qui les relit. Les poser
+# ici aussi créerait deux listes à tenir, et donc deux listes qui divergent.
 
 OPTIONS_OUI_NON = {"choices": [{"name": "Oui"}, {"name": "Non"}]}
 
@@ -147,31 +118,68 @@ def _options_reprises(champ, tables_par_nom):
 
 
 def champs_voulus(source, tables_par_nom):
-    """La liste des champs à poser, dérivée du schéma de l'`Annuaire`."""
+    """La liste des champs à poser : libellés lisibles, types dérivés de l'Annuaire.
+
+    Le nom du champ est le **libellé de la question**, parce qu'un formulaire
+    Airtable l'affiche tel quel. Le type et les options, eux, viennent de la
+    colonne de l'Annuaire qu'il vise : c'est ce qui garantit qu'une valeur saisie
+    ici sera acceptée là-bas, sans `typecast`.
+    """
     par_nom = {c["name"]: c for c in source["fields"]}
-    voulus = [{"name": CHAMP_FICHE, "type": "singleLineText"}]
+    voulus = [{"name": CHAMP_FICHE, "type": "singleLineText",
+               "description": "Rempli automatiquement, ne pas modifier. Identifie "
+                              "la fiche à mettre à jour."}]
     manquants = []
 
-    for nom in CHAMPS_MIROIR:
-        origine = par_nom.get(nom)
+    for libelle, colonne, explication in CHAMPS_FORMULAIRE:
+        origine = par_nom.get(colonne)
         if not origine:
-            manquants.append(nom)
+            manquants.append("%s → colonne « %s »" % (libelle, colonne))
             continue
-        champ = {"name": nom, "type": origine["type"]}
-        options = _options_reprises(origine, tables_par_nom)
-        if options is not None:
-            champ["options"] = options
-        elif origine["type"] == "multipleRecordLinks":
-            manquants.append("%s (table liée introuvable)" % nom)
-            continue
+
+        if colonne in COLONNES_OUI_NON:
+            # Texte dans l'Annuaire, liste ici : on ne demande pas à un adhérent
+            # de taper « Oui » à la main. C'est la réconciliation qui réécrit la
+            # chaîne attendue.
+            champ = {"name": libelle, "type": "singleSelect",
+                     "options": OPTIONS_OUI_NON}
+        else:
+            champ = {"name": libelle, "type": origine["type"]}
+            options = _options_reprises(origine, tables_par_nom)
+            if options is not None:
+                champ["options"] = options
+            elif origine["type"] == "multipleRecordLinks":
+                manquants.append("%s (table liée introuvable)" % libelle)
+                continue
+
+        if explication:
+            champ["description"] = explication
         voulus.append(champ)
 
-    for nom in CHAMPS_OUI_NON:
-        voulus.append({"name": nom, "type": "singleSelect", "options": OPTIONS_OUI_NON})
-
     voulus.append({"name": CHAMP_SYNCHRONISE, "type": "checkbox",
-                   "options": {"icon": "check", "color": "greenBright"}})
+                   "options": {"icon": "check", "color": "greenBright"},
+                   "description": "Coché par la réconciliation. Ne pas mettre dans "
+                                  "le formulaire."})
     return voulus, manquants
+
+
+def renommages(cible):
+    """Les champs encore nommés comme la colonne qu'ils visent.
+
+    La table a d'abord été posée le 28/08/2026 avec les noms de colonnes de
+    l'Annuaire, avant qu'on s'avise qu'un formulaire affiche ces noms tels quels
+    et qu'« Partage de donnée autorisé » n'est pas une question. Ce bloc fait la
+    bascule, une fois, sans perdre les réponses déjà saisies.
+    """
+    par_nom = {c["name"]: c for c in cible["fields"]}
+    a_renommer = []
+    for libelle, colonne, _ in CHAMPS_FORMULAIRE:
+        if libelle == colonne:
+            continue
+        ancien = par_nom.get(colonne)
+        if ancien and libelle not in par_nom:
+            a_renommer.append((ancien["id"], colonne, libelle))
+    return a_renommer
 
 
 def imprimer_spec(voulus):
@@ -182,8 +190,11 @@ def imprimer_spec(voulus):
     print()
     print("Créer une table « %s », puis ces champs dans cet ordre :" % TABLE_CIBLE)
     print()
+    vise = {libelle: colonne for libelle, colonne, _ in CHAMPS_FORMULAIRE}
     for i, champ in enumerate(voulus, 1):
-        ligne = "%2d. %-28s %s" % (i, champ["name"], champ["type"])
+        ligne = "%2d. %-52s %-20s" % (i, champ["name"], champ["type"])
+        if champ["name"] in vise:
+            ligne += " → %s" % vise[champ["name"]]
         options = champ.get("options") or {}
         if "choices" in options:
             ligne += " — " + ", ".join(c["name"] for c in options["choices"])
@@ -195,7 +206,7 @@ def imprimer_spec(voulus):
     print("  · « %s » est prérempli et **masqué** (hide_%s=true dans l'URL) ;"
           % (CHAMP_FICHE, CHAMP_FICHE))
     print("  · « %s » n'apparaît pas dans le formulaire ;" % CHAMP_SYNCHRONISE)
-    print("  · « Structure(s) » est limité à une **vue filtrée** de Structures,")
+    print("  · « Votre structure » est limité à une **vue filtrée** de Structures,")
     print("    sans autorisation d'en créer une nouvelle — c'est là que se gagne")
     print("    la qualité de la donnée, 577 structures pour 29 sites web.")
 
@@ -221,6 +232,13 @@ class Airtable:
             headers=self.h, json={"name": nom, "fields": champs}, timeout=30)
         self._verifier(r)
         return r.json()
+
+    def modifier_champ(self, table_id, champ_id, **attributs):
+        r = requests.patch(
+            "https://api.airtable.com/v0/meta/bases/%s/tables/%s/fields/%s"
+            % (self.base, table_id, champ_id),
+            headers=self.h, json=attributs, timeout=30)
+        self._verifier(r)
 
     def creer_champ(self, table_id, champ):
         r = requests.post(
@@ -308,8 +326,26 @@ def main():
         _rappel_formulaire()
         return 0
 
+    a_renommer = renommages(cible)
+    if a_renommer:
+        print("→ renommer %d champ(s) en libellé de question" % len(a_renommer))
+        for _, ancien, nouveau in a_renommer:
+            print("     %-28s → %s" % (ancien, nouveau))
+        if args.appliquer:
+            for champ_id, _, nouveau in a_renommer:
+                at.modifier_champ(cible["id"], champ_id, name=nouveau)
+            print("   ✅ renommés")
+            cible = {t["name"]: t for t in at.schema()}[TABLE_CIBLE]
+        print()
+
+    # En simulation, les renommages n'ont pas eu lieu : on raisonne quand même
+    # sur leur résultat, sinon la simulation annoncerait de recréer les champs
+    # qu'elle vient d'annoncer renommer.
     existants = {c["name"] for c in cible["fields"]}
+    existants |= {nouveau for _, _, nouveau in a_renommer}
     a_poser = [c for c in voulus if c["name"] not in existants]
+
+    _poser_descriptions(at, cible, voulus, args.appliquer)
     print("table « %s » déjà présente (%s) — %d champ(s) sur %d"
           % (TABLE_CIBLE, cible["id"], len(existants), len(voulus)))
     if not a_poser:
@@ -334,6 +370,32 @@ def main():
         print("   ✅ %s" % champ["name"])
     _rappel_formulaire()
     return 0
+
+
+def _poser_descriptions(at, cible, voulus, appliquer):
+    """Les explications affichées sous chaque question du formulaire.
+
+    Elles ne se posent pas qu'à la création : un champ renommé, ou créé avant
+    qu'on écrive son explication, n'en a pas. C'est le seul texte que l'adhérent
+    lit pour comprendre ce qu'on lui demande — le laisser vide, c'est lui laisser
+    deviner.
+    """
+    voulues = {c["name"]: c.get("description", "") for c in voulus}
+    a_poser = [(c["id"], c["name"], voulues[c["name"]])
+               for c in cible["fields"]
+               if c["name"] in voulues and voulues[c["name"]]
+               and (c.get("description") or "") != voulues[c["name"]]]
+    if not a_poser:
+        return
+    print("→ poser %d explication(s) de champ" % len(a_poser))
+    if not appliquer:
+        for _, nom, _ in a_poser:
+            print("     %s" % nom)
+        return
+    for champ_id, nom, description in a_poser:
+        at.modifier_champ(cible["id"], champ_id, description=description)
+    print("   ✅ posées")
+    print()
 
 
 def _poser_suivi(at, annuaire, appliquer):
@@ -371,7 +433,7 @@ def _rappel_formulaire():
     print("Reste à faire dans l'interface — l'API ne crée pas de formulaire :")
     print("  1. construire le formulaire sur cette table ;")
     print("  2. masquer « %s » et « %s » ;" % (CHAMP_FICHE, CHAMP_SYNCHRONISE))
-    print("  3. limiter « Structure(s) » à une vue filtrée de Structures, sans")
+    print("  3. limiter « Votre structure » à une vue filtrée de Structures, sans")
     print("     autorisation d'en créer une nouvelle ;")
     print("  4. reporter l'identifiant du formulaire (shrXXXX) dans la formule")
     print("     « lien personnalisé formulaire » de l'Annuaire.")

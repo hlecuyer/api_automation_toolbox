@@ -844,10 +844,16 @@ FICHE = {"id": "recFICHE", "fields": {"E-mail": "x@example.org"}}
 
 class TestMiseAJour:
     def relue(self, **champs):
-        base = {"E-mail": "x@example.org",
-                "Fonction (structure)": parcours.CORRECTIONS["Fonction (structure)"],
-                "Genre": parcours.CORRECTIONS["Genre"],
-                parcours.CHAMP_DATE_MAJ: "2026-08-28"}
+        """La fiche telle qu'elle doit être relue après réconciliation.
+
+        Les corrections sont indexées par **libellé de question** ; la fiche,
+        elle, porte des noms de colonnes. La traduction passe par la même
+        correspondance que le code, sinon ce test validerait sa propre idée du
+        rapprochement plutôt que celle du module.
+        """
+        base = {"E-mail": "x@example.org", parcours.CHAMP_DATE_MAJ: "2026-08-28"}
+        base.update({parcours.CORRESPONDANCE[libelle]: valeur
+                     for libelle, valeur in parcours.CORRECTIONS.items()})
         base.update(champs)
         return {"id": "recFICHE", "fields": base}
 

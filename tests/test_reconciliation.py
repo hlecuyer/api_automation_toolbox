@@ -95,20 +95,35 @@ class TestPayload:
 
     def test_un_faux_booleen_est_une_reponse(self):
         """`False` dit quelque chose, contrairement à une chaîne vide."""
-        assert payload_depuis_reponse({"Visible sur le site": False}) == {
+        assert payload_depuis_reponse({"Nom et prénom visibles sur le site": False}) == {
             "Visible sur le site": False}
 
     def test_un_zero_est_une_reponse(self):
-        assert payload_depuis_reponse({"code postal": 0}) == {"code postal": 0}
+        assert payload_depuis_reponse({"Code postal": 0}) == {"code postal": 0}
 
-    def test_le_rapprochement_est_une_identite(self):
-        """La table de réponses est dérivée du schéma de l'Annuaire : il n'y a
-        pas de table de correspondance, donc rien qui puisse diverger."""
-        champs = {"Prénom": "P", "Genre": "Féminin", "Structure(s)": ["recS"],
-                  "Type": ["Chercheur·se"], CHAMP_FICHE: "recX"}
+    def test_les_libelles_sont_traduits_en_colonnes(self):
+        """Le formulaire pose des questions lisibles ; l'Annuaire porte des noms
+        de colonnes. La correspondance est déclarée une seule fois."""
+        champs = {"Prénom": "P", "Votre structure": ["recS"],
+                  "Vous êtes plutôt": ["Chercheur·se"],
+                  "Deux personnes que vous connaissez à la Coop": "Nicole, Vera",
+                  CHAMP_FICHE: "recX"}
         assert payload_depuis_reponse(champs) == {
-            "Prénom": "P", "Genre": "Féminin", "Structure(s)": ["recS"],
-            "Type": ["Chercheur·se"]}
+            "Prénom": "P", "Structure(s)": ["recS"],
+            "Type": ["Chercheur·se"], "2 personnes connues": "Nicole, Vera"}
+
+    def test_un_libelle_inconnu_est_ignore(self):
+        """Une question ajoutée au formulaire sans être déclarée ne doit pas
+        faire échouer l'écriture des autres réponses : sans `typecast`, une
+        colonne inexistante suffirait."""
+        assert payload_depuis_reponse(
+            {"Prénom": "P", "Question ajoutée à la main": "oui"}) == {"Prénom": "P"}
+
+    def test_toutes_les_colonnes_visees_sont_distinctes(self):
+        """Deux questions qui viseraient la même colonne s'écraseraient l'une
+        l'autre, selon l'ordre du dictionnaire — donc au hasard."""
+        colonnes = [c for _, c, _ in reconciliation.CHAMPS_FORMULAIRE]
+        assert len(colonnes) == len(set(colonnes))
 
 
 # --------------------------------------------------------------------------
