@@ -715,6 +715,22 @@ CORRECTIONS = {
 EN_ATTENTE = "en-attente-de-validation"
 
 
+def derniere_reponse(reponses, fiche_id):
+    """La réponse la plus récente qui désigne cette fiche.
+
+    Par `createdTime`, pas par l'ordre rendu : Airtable rend les
+    enregistrements dans l'ordre de la vue, pas dans celui de leur création. Une
+    fiche remplie deux fois — ce qui arrive dès qu'on rejoue le parcours —
+    faisait relire la **première** réponse, donc vérifier autre chose que ce qui
+    venait d'être saisi. Constaté le 28/08/2026, sur le second essai.
+    """
+    trouvees = reponses.list_records(
+        filter_by_formula="{%s}='%s'" % (CHAMP_FICHE, fiche_id))
+    if not trouvees:
+        return None
+    return max(trouvees, key=lambda r: r.get("createdTime", ""))
+
+
 def _lecteur_de_liens(modele):
     """De quoi lire les noms d'une table liée, sur la même base que `modele`.
 
@@ -757,13 +773,11 @@ def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
         return EN_ATTENTE
     input("   Entrée quand le formulaire est validé — ")
 
-    trouvees = reponses.list_records(
-        filter_by_formula="{%s}='%s'" % (CHAMP_FICHE, fiche["id"]))
-    if not trouvees:
+    depose = derniere_reponse(reponses, fiche["id"])
+    if not depose:
         print("   ❌ aucune réponse ne désigne la fiche %s" % fiche["id"])
         print("      Le formulaire préremplit-il « %s », et le masque-t-il ?" % CHAMP_FICHE)
-        return None
-    return trouvees[-1]
+    return depose
 
 
 def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):

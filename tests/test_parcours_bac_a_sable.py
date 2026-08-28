@@ -927,3 +927,41 @@ class TestMiseAJour:
 
         assert ecarts == 0
         assert "sera rejouée" in capsys.readouterr().out
+
+
+class TestDerniereReponse:
+    """Quelle réponse on relit quand la fiche en porte plusieurs.
+
+    Airtable rend les enregistrements dans l'ordre de la vue, pas dans celui de
+    leur création. Le 28/08/2026, le second essai a relu la réponse du premier :
+    le parcours vérifiait autre chose que ce qui venait d'être saisi, et le
+    disait vert.
+    """
+
+    class Table:
+        def __init__(self, lignes):
+            self.lignes = lignes
+            self.formule = None
+
+        def list_records(self, filter_by_formula=None, **_):
+            self.formule = filter_by_formula
+            return self.lignes
+
+    def ligne(self, ident, quand):
+        return {"id": ident, "createdTime": quand, "fields": {}}
+
+    def test_la_plus_recente_gagne_quel_que_soit_l_ordre_rendu(self):
+        table = self.Table([self.ligne("recVIEILLE", "2026-08-28T13:38:44.000Z"),
+                            self.ligne("recNEUVE", "2026-08-28T13:46:03.000Z")])
+        assert parcours.derniere_reponse(table, "recF")["id"] == "recNEUVE"
+
+        table.lignes.reverse()
+        assert parcours.derniere_reponse(table, "recF")["id"] == "recNEUVE"
+
+    def test_la_recherche_passe_par_le_record_id(self):
+        table = self.Table([self.ligne("recA", "2026-08-28T13:00:00.000Z")])
+        parcours.derniere_reponse(table, "recF")
+        assert parcours.CHAMP_FICHE in table.formule and "recF" in table.formule
+
+    def test_aucune_reponse_rend_rien(self):
+        assert parcours.derniere_reponse(self.Table([]), "recF") is None
