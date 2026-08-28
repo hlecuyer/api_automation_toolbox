@@ -837,7 +837,8 @@ def monter_mise_a_jour(monkeypatch, table, fiche_relue):
     sync = faux_sync(annuaire)
     monkeypatch.setattr(parcours, "Reconciliation",
                         lambda a, r: Mock(passer=Mock(return_value={
-                            "màj_reçues": 1, "màj_appliquées": 1, "erreurs": 0})))
+                            "màj_reçues": 1, "màj_appliquées": 1, "orphelines": 0,
+                            "erreurs": 0})))
     return sync
 
 

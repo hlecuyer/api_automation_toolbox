@@ -25,9 +25,17 @@ d'une personne privait toutes les autres de synchronisation. Chaque réponse est
 donc traitée dans son propre `try`.
 
 **Une réponse non recopiée reste non synchronisée.** Elle sera retentée au
-passage suivant. Une erreur permanente — un `record_id` qui ne désigne plus
-rien — se signalera donc à chaque passage, et c'est voulu : elle est visible
-dans la ligne de vie au lieu d'être enterrée par un abandon silencieux.
+passage suivant : une panne d'Airtable ou un refus passager ne doit pas perdre
+ce qu'un adhérent a saisi.
+
+**Mais une réponse orpheline est comptée à part.** Une fiche supprimée ne
+reviendra pas, et la réponse qui la désigne ne s'appliquera jamais. La compter
+comme une erreur à chaque passage ferait un compteur d'erreurs perpétuellement
+non nul — c'est-à-dire un compteur que plus personne ne lit, et la sentinelle
+qui crie au loup toutes les heures. Ce projet connaît déjà la panne par silence ;
+la panne par bruit permanent est la même, vue de l'autre côté. Constaté le
+28/08/2026 en supprimant une fiche témoin dont le formulaire venait d'être
+rempli.
 """
 
 import syslog
@@ -44,6 +52,11 @@ CHAMP_SYNCHRONISE = "Synchronisé"
 CHAMP_DATE_MAJ = "Fiche mise à jour le"
 
 CHAMPS_TECHNIQUES = (CHAMP_FICHE, CHAMP_SYNCHRONISE)
+
+# Verdict d'une réponse qui désigne une fiche disparue. Ni une réussite ni une
+# erreur à retenter : un état stable, qu'il faut pouvoir distinguer des deux
+# autres sans lire les journaux.
+ORPHELINE = "orpheline"
 
 # Le formulaire, dans l'ordre où il pose ses questions.
 #
@@ -170,7 +183,8 @@ class Reconciliation:
         laisserait les suivantes en plan, ce qui est exactement le défaut qu'on
         vient de corriger ailleurs.
         """
-        compteurs = {"màj_reçues": 0, "màj_appliquées": 0, "erreurs": 0}
+        compteurs = {"màj_reçues": 0, "màj_appliquées": 0, "orphelines": 0,
+                     "erreurs": 0}
         try:
             reponses = self.a_traiter()
         except Exception as e:
@@ -182,8 +196,11 @@ class Reconciliation:
         compteurs["màj_reçues"] = len(reponses)
         for reponse in reponses:
             try:
-                if self._appliquer(reponse, dry_run):
+                verdict = self._appliquer(reponse, dry_run)
+                if verdict is True:
                     compteurs["màj_appliquées"] += 1
+                elif verdict is ORPHELINE:
+                    compteurs["orphelines"] += 1
                 else:
                     compteurs["erreurs"] += 1
             except Exception as e:
@@ -194,6 +211,18 @@ class Reconciliation:
                     "sont traitées quand même" % (reponse.get("id"), e),
                 )
         return compteurs
+
+    def _fiche_existe(self, identifiant):
+        """La fiche est-elle encore là ?
+
+        Rend `True` en cas de doute : un Airtable injoignable ne doit pas faire
+        passer pour définitivement perdue une réponse qui ne l'est pas.
+        """
+        try:
+            return bool(self.annuaire.list_records(
+                filter_by_formula="RECORD_ID()='%s'" % identifiant))
+        except Exception:
+            return True
 
     def _appliquer(self, reponse, dry_run):
         champs = reponse.get("fields", {})
@@ -222,6 +251,17 @@ class Reconciliation:
             return True
 
         if not self.annuaire.update_record(fiche, payload):
+            # L'échec ne dit pas pourquoi. On ne va le demander qu'ici, sur le
+            # chemin rare : une fiche disparue ne se retente pas, un refus
+            # passager si.
+            if not self._fiche_existe(fiche):
+                syslog.syslog(
+                    syslog.LOG_WARNING,
+                    "reconciliation: la fiche %s n'existe plus (réponse %s). Cette "
+                    "réponse ne s'appliquera jamais — à supprimer ou à réaffecter."
+                    % (fiche, reponse.get("id")),
+                )
+                return ORPHELINE
             syslog.syslog(
                 syslog.LOG_ERR,
                 "reconciliation: écriture refusée sur la fiche %s (réponse %s). "

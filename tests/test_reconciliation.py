@@ -40,8 +40,9 @@ def reponse(champs=None, fiche="recFICHE", quand="2026-08-28T09:00:00.000Z"):
 class FauxAnnuaire:
     """Le client de l'Annuaire, sans réseau."""
 
-    def __init__(self, refuse=()):
+    def __init__(self, refuse=(), disparues=()):
         self.refuse = set(refuse)
+        self.disparues = set(disparues)
         self.ecritures = []
         self.normalized_fields = {}
 
@@ -49,6 +50,11 @@ class FauxAnnuaire:
         # Le vrai client ramène les variantes sur la valeur du référentiel.
         if "Genre" in fields and fields["Genre"] in ("H", "M"):
             fields["Genre"] = "Masculin"
+
+    def list_records(self, filter_by_formula=None, **_):
+        # Une fiche refusée existe quand même : c'est un refus, pas une
+        # disparition. Les fiches disparues sont déclarées séparément.
+        return [] if any(d in (filter_by_formula or "") for d in self.disparues) else [{"id": "recX"}]
 
     def update_record(self, record_id, fields, dry_run=False):
         if record_id in self.refuse:
@@ -75,8 +81,8 @@ class FauxReponses:
         return {"id": record_id}
 
 
-def passer(lignes, refuse=(), refuse_marquage=False, dry_run=False):
-    annuaire = FauxAnnuaire(refuse)
+def passer(lignes, refuse=(), refuse_marquage=False, dry_run=False, disparues=()):
+    annuaire = FauxAnnuaire(refuse, disparues)
     reponses = FauxReponses(lignes, refuse_marquage)
     compteurs = Reconciliation(annuaire, reponses).passer(dry_run=dry_run)
     return compteurs, annuaire, reponses
@@ -146,7 +152,7 @@ class TestPassage:
     def test_cas_nominal(self, _syslog):
         compteurs, annuaire, reponses = passer([reponse({Q_PRENOM: "Prosper"})])
 
-        assert compteurs == {"màj_reçues": 1, "màj_appliquées": 1, "erreurs": 0}
+        assert compteurs == {"màj_reçues": 1, "màj_appliquées": 1, "orphelines": 0, "erreurs": 0}
         fiche, champs = annuaire.ecritures[0]
         assert fiche == "recFICHE"
         assert champs["Prénom"] == "Prosper"
@@ -184,7 +190,7 @@ class TestResistance:
     def test_une_reponse_sans_fiche_est_une_erreur_pas_une_panne(self, _syslog):
         compteurs, annuaire, reponses = passer([reponse({Q_PRENOM: "P"}, fiche=None)])
 
-        assert compteurs == {"màj_reçues": 1, "màj_appliquées": 0, "erreurs": 1}
+        assert compteurs == {"màj_reçues": 1, "màj_appliquées": 0, "orphelines": 0, "erreurs": 1}
         assert annuaire.ecritures == []
         assert reponses.marquees == []
 
@@ -201,7 +207,7 @@ class TestResistance:
         ]
         compteurs, annuaire, _ = passer(lignes)
 
-        assert compteurs == {"màj_reçues": 3, "màj_appliquées": 2, "erreurs": 1}
+        assert compteurs == {"màj_reçues": 3, "màj_appliquées": 2, "orphelines": 0, "erreurs": 1}
         assert [f for f, _ in annuaire.ecritures] == ["recA", "recC"]
 
     def test_une_exception_sur_une_ligne_laisse_passer_les_suivantes(self, _syslog):
@@ -216,7 +222,7 @@ class TestResistance:
         ])
         compteurs = Reconciliation(annuaire, reponses).passer()
 
-        assert compteurs == {"màj_reçues": 2, "màj_appliquées": 1, "erreurs": 1}
+        assert compteurs == {"màj_reçues": 2, "màj_appliquées": 1, "orphelines": 0, "erreurs": 1}
 
     def test_ecriture_refusee_la_reponse_reste_a_retenter(self, _syslog):
         """Ne pas marquer une réponse qu'on n'a pas su appliquer : le passage
@@ -240,7 +246,7 @@ class TestResistance:
 
         compteurs = Reconciliation(annuaire, reponses).passer()
 
-        assert compteurs == {"màj_reçues": 0, "màj_appliquées": 0, "erreurs": 1}
+        assert compteurs == {"màj_reçues": 0, "màj_appliquées": 0, "orphelines": 0, "erreurs": 1}
 
 
 @patch("src.reconciliation.syslog")
@@ -263,3 +269,47 @@ class TestDate:
     def test_sans_createdTime_on_prend_aujourd_hui(self):
         from datetime import datetime
         assert reconciliation._date_de({}) == datetime.now().strftime("%Y-%m-%d")
+
+
+@patch("src.reconciliation.syslog")
+class TestOrphelines:
+    """Une réponse qui désigne une fiche supprimée.
+
+    Elle ne s'appliquera jamais. La compter comme une erreur à chaque passage
+    ferait un compteur d'erreurs perpétuellement non nul — donc un compteur que
+    plus personne ne lit, et une sentinelle qui crie au loup toutes les heures.
+    Constaté le 28/08/2026 en supprimant une fiche témoin dont le formulaire
+    venait d'être rempli.
+    """
+
+    def test_elle_est_comptee_a_part(self, _syslog):
+        compteurs, _, _ = passer([reponse({Q_PRENOM: "P"})],
+                                 refuse={"recFICHE"}, disparues={"recFICHE"})
+
+        assert compteurs["orphelines"] == 1
+        assert compteurs["erreurs"] == 0
+
+    def test_elle_n_est_pas_marquee_synchronisee(self, _syslog):
+        """Le dire appliqué serait un mensonge : rien n'a été écrit."""
+        _, _, reponses = passer([reponse({Q_PRENOM: "P"})],
+                                refuse={"recFICHE"}, disparues={"recFICHE"})
+        assert reponses.marquees == []
+
+    def test_un_refus_passager_reste_une_erreur(self, _syslog):
+        """La distinction porte sur l'existence de la fiche, pas sur l'échec."""
+        compteurs, _, _ = passer([reponse({Q_PRENOM: "P"})], refuse={"recFICHE"})
+
+        assert compteurs["erreurs"] == 1
+        assert compteurs["orphelines"] == 0
+
+    def test_un_airtable_injoignable_ne_condamne_pas_la_reponse(self, _syslog):
+        """En cas de doute, la réponse reste à retenter : mieux vaut réessayer
+        pour rien que perdre ce qu'un adhérent a saisi."""
+        annuaire = FauxAnnuaire(refuse={"recFICHE"})
+        annuaire.list_records = Mock(side_effect=RuntimeError("Airtable HS"))
+        reponses = FauxReponses([reponse({Q_PRENOM: "P"})])
+
+        compteurs = Reconciliation(annuaire, reponses).passer()
+
+        assert compteurs["erreurs"] == 1
+        assert compteurs["orphelines"] == 0

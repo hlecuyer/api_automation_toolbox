@@ -829,7 +829,7 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):
 
     compteurs = Reconciliation(sync.airtable_client, reponses).passer()
     print("   ·  passage : reçues=%(màj_reçues)s appliquées=%(màj_appliquées)s "
-          "erreurs=%(erreurs)s" % compteurs)
+          "orphelines=%(orphelines)s erreurs=%(erreurs)s" % compteurs)
 
     ecarts = 0
     relue = sync.airtable_client.find_record_by_email(fiche["fields"].get("E-mail", ""))
