@@ -105,3 +105,41 @@ class TestFormule:
         f = formule(BASE, FORM)
         assert "{Partage de donnée autorisé}" in f
         assert "{Souhaitez-vous partager" not in f
+
+
+class TestLiens:
+    """La résolution des colonnes liées.
+
+    C'est la question qui porte le chantier : sans nom lisible, « Dans quelle
+    structure travaillez-vous ? » arrive vide, et l'adhérent la ressaisit — donc
+    on retombe sur le texte libre qu'on essaie justement de supprimer.
+    """
+
+    def lire(self, table, principal, identifiants):
+        self.appel = (table, principal, identifiants)
+        return ["La Coop des Communs"]
+
+    def test_les_identifiants_deviennent_des_noms(self):
+        noms = lien_formulaire.resoudre_liens(
+            fiche(**{"Structure(s)": ["recSTRUCT"]}), self.lire)
+        assert noms == {"Structure(s)": ["La Coop des Communs"]}
+        assert self.appel == ("Structures", "Name", ["recSTRUCT"])
+
+    def test_une_colonne_vide_n_est_pas_lue(self):
+        """Un appel réseau pour rien, c'est aussi une occasion de plantage."""
+        assert lien_formulaire.resoudre_liens(fiche(), self.lire) == {}
+        assert not hasattr(self, "appel")
+
+    def test_rien_de_trouve_ne_prerempli_rien(self):
+        """Mieux vaut une question vide qu'un « recXXX » dans le formulaire."""
+        assert lien_formulaire.resoudre_liens(
+            fiche(**{"Structure(s)": ["recX"]}),
+            lambda *_: []) == {}
+
+    def test_le_resultat_se_branche_sur_url(self):
+        noms = lien_formulaire.resoudre_liens(
+            fiche(**{"Structure(s)": ["recSTRUCT"]}), self.lire)
+        p = parametres(url(BASE, FORM, fiche(**{"Structure(s)": ["recSTRUCT"]}),
+                           liens=noms))
+        assert p["prefill_Dans quelle structure travaillez-vous ?"] == \
+            "La Coop des Communs"

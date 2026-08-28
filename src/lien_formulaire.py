@@ -39,6 +39,15 @@ COLONNES_DATE = ("date de naissance",)
 # non résolue plutôt qu'à la préremplir avec un `rec…` que l'adhérent verrait.
 PREFIXE_IDENTIFIANT = "rec"
 
+# Les colonnes liées, et où lire le nom lisible de ce qu'elles pointent :
+# `colonne de l'Annuaire → (table liée, champ principal)`.
+#
+# Un formulaire Airtable préremplit un champ lié par le **nom** de
+# l'enregistrement, pas par son identifiant. L'`Annuaire`, lui, ne stocke que des
+# identifiants. D'où cette résolution : sans elle, la question sur la structure
+# arrive vide, et c'est justement celle qui porte tout le chantier.
+COLONNES_LIEES = {"Structure(s)": ("Structures", "Name")}
+
 
 def _identifiants(valeurs):
     return all(isinstance(v, str) and v.startswith(PREFIXE_IDENTIFIANT) for v in valeurs)
@@ -56,6 +65,26 @@ def racine(base, formulaire):
     if formulaire.startswith("http"):
         return formulaire.split("?")[0].rstrip("/")
     return "%s/%s/%s" % (RACINE, base, formulaire)
+
+
+def resoudre_liens(fiche, lire):
+    """Les noms lisibles des colonnes liées d'une fiche.
+
+    Args:
+        fiche: l'enregistrement de l'`Annuaire`.
+        lire: `(table, champ, identifiants) -> [noms]`. Passé plutôt qu'appelé
+            en direct : ce module ne parle pas au réseau, et le test n'a donc
+            rien à simuler.
+    """
+    noms = {}
+    for colonne, (table, principal) in COLONNES_LIEES.items():
+        identifiants = fiche.get("fields", {}).get(colonne) or []
+        if not identifiants:
+            continue
+        trouves = lire(table, principal, identifiants)
+        if trouves:
+            noms[colonne] = trouves
+    return noms
 
 
 def url(base, formulaire, fiche, liens=None):

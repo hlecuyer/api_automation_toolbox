@@ -715,6 +715,24 @@ CORRECTIONS = {
 EN_ATTENTE = "en-attente-de-validation"
 
 
+def _lecteur_de_liens(modele):
+    """De quoi lire les noms d'une table liée, sur la même base que `modele`.
+
+    Le client porte déjà la base et le jeton : on ne les repasse pas, ce serait
+    une seconde occasion de viser la mauvaise base.
+    """
+    from src.clients.airtable_client import AirtableClient
+
+    def lire(table, principal, identifiants):
+        client = AirtableClient(api_key=modele.api_key, base_id=modele.base_id,
+                                table_name=table)
+        formule = "OR(%s)" % ",".join("RECORD_ID()='%s'" % i for i in identifiants)
+        return [r["fields"].get(principal) for r in client.list_records(
+            filter_by_formula=formule) if r["fields"].get(principal)]
+
+    return lire
+
+
 def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
     """Le vrai formulaire, rempli par Hugo, dans son navigateur.
 
@@ -723,9 +741,10 @@ def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
     tout ce qui vient après le formulaire, jamais le formulaire lui-même. Même
     rapport que `--complet` entretient avec l'adhésion HelloAsso.
     """
-    from src.lien_formulaire import url
+    from src.lien_formulaire import resoudre_liens, url
 
-    lien = url(cibles["base"], formulaire, fiche)
+    lien = url(cibles["base"], formulaire, fiche,
+               liens=resoudre_liens(fiche, _lecteur_de_liens(reponses)))
     print("   ·  ouvre ce lien, vérifie que tes données sont là, corrige, valide :")
     print()
     print("      %s" % lien)
