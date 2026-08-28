@@ -66,6 +66,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src import garde_fou_envoi
+from src.reconciliation import (CHAMP_DATE_MAJ, CHAMP_FICHE,
+                                 CHAMP_SYNCHRONISE, Reconciliation)
 from src.hello_asso_sync import SyncHelloAsso
 from src.models.user_subscription import (CHAMPS_BOOLEENS_AIRTABLE,
                                           CHAMPS_HELLOASSO_VERS_AIRTABLE)
@@ -683,7 +685,98 @@ def etape_mail(client_email, conf, prenom, adresse, compteurs=None, livraison=Fa
     return ecarts
 
 
-def etape_menage(sync, client_ovh, cibles, fiche, adresse, garder):
+TABLE_REPONSES = "Mise à jour fiche"
+
+# Ce que la fausse réponse corrige : un texte libre et une valeur de liste
+# fermée, les deux natures qui se comportent différemment à l'écriture.
+#
+# La valeur de liste est **une option valide**, et pas une variante comme « H ».
+# Le bac à sable l'a montré le 28/08/2026 : la table de réponses refuse « H »,
+# parce que ses listes déroulantes sont dérivées de celles de l'Annuaire. C'est
+# une propriété gagnée en générant la table depuis le schéma plutôt qu'en la
+# saisissant — **une valeur hors options ne peut pas naître de ce formulaire**,
+# donc la classe de bug qui fait échouer l'écriture entière est fermée à la
+# source. Le référentiel reste appliqué à la réconciliation par précaution, et
+# c'est `tests/test_reconciliation.py` qui l'éprouve.
+CORRECTIONS = {"Fonction (structure)": "Fonction corrigée par l'adhérent",
+               "Genre": "Féminin"}
+
+
+def etape_mise_a_jour(sync, credentials, cibles, fiche, conf):
+    """L'adhérent corrige sa fiche, et la réconciliation la recopie.
+
+    C'est la seconde moitié du parcours cible : le formulaire n'est pas rejoué
+    ici — l'API ne sait pas soumettre un formulaire Airtable — mais **tout ce
+    qui vient après lui** l'est, à partir d'une réponse déposée dans la table.
+    Ce qui n'est donc pas prouvé ici, c'est le préremplissage ; c'est le
+    parcours complet, avec une vraie soumission, qui s'en charge.
+    """
+    from src.clients.airtable_client import AirtableClient
+
+    print()
+    print("8. La mise à jour de fiche")
+    if not fiche:
+        print("   – sans fiche, rien à mettre à jour")
+        return 1, None
+
+    reponses = AirtableClient(
+        api_key=credentials["airtable"]["api_key"],
+        base_id=credentials["airtable"]["base_id"],
+        table_name=TABLE_REPONSES,
+    )
+
+    depose = reponses.create_record(dict(CORRECTIONS, **{CHAMP_FICHE: fiche["id"]}))
+    if not depose:
+        print("   ❌ impossible de déposer une réponse dans « %s »" % TABLE_REPONSES)
+        print("      La table existe-t-elle ? scripts/creer_table_mise_a_jour.py")
+        return 1, None
+    print("   ✅ réponse déposée — %s, désignant la fiche %s" % (depose["id"], fiche["id"]))
+
+    compteurs = Reconciliation(sync.airtable_client, reponses).passer()
+    print("   ·  passage : reçues=%(màj_reçues)s appliquées=%(màj_appliquées)s "
+          "erreurs=%(erreurs)s" % compteurs)
+
+    ecarts = 0
+    relue = sync.airtable_client.find_record_by_email(fiche["fields"].get("E-mail", ""))
+    champs = (relue or {}).get("fields", {})
+
+    attendu = CORRECTIONS["Fonction (structure)"]
+    if champs.get("Fonction (structure)") == attendu:
+        print("   ✅ %-28s « %s »" % ("Fonction (structure)", attendu))
+    else:
+        print("   ❌ %-28s « %s », attendu « %s »"
+              % ("Fonction (structure)", champs.get("Fonction (structure)"), attendu))
+        ecarts += 1
+
+    if champs.get("Genre") == CORRECTIONS["Genre"]:
+        print("   ✅ %-28s corrigé en « %s » — valeur de liste fermée écrite sans"
+              % ("Genre", CORRECTIONS["Genre"]))
+        print("      typecast, donc reconnue par la base")
+    else:
+        print("   ❌ %-28s « %s », attendu « %s »"
+              % ("Genre", champs.get("Genre"), CORRECTIONS["Genre"]))
+        ecarts += 1
+
+    if champs.get(CHAMP_DATE_MAJ):
+        print("   ✅ %-28s %s — l'adhérent ne sera plus relancé"
+              % (CHAMP_DATE_MAJ, champs[CHAMP_DATE_MAJ]))
+    else:
+        print("   ❌ %-28s vide : le suivi ne sait pas qu'il a répondu" % CHAMP_DATE_MAJ)
+        ecarts += 1
+
+    relue_reponse = reponses.list_records(
+        filter_by_formula="RECORD_ID()='%s'" % depose["id"])
+    if relue_reponse and relue_reponse[0]["fields"].get(CHAMP_SYNCHRONISE):
+        print("   ✅ %-28s cochée — elle ne sera pas rejouée" % CHAMP_SYNCHRONISE)
+    else:
+        print("   ⚠  %-28s non cochée : la réponse sera rejouée au passage suivant,"
+              % CHAMP_SYNCHRONISE)
+        print("      sans conséquence puisque les valeurs sont les mêmes")
+
+    return ecarts, (reponses, depose["id"])
+
+
+def etape_menage(sync, client_ovh, cibles, fiche, adresse, garder, reponse=None):
     """Rendre le bac à sable dans l'état trouvé.
 
     Ce n'est pas de la coquetterie : l'espace de travail Airtable de la Coop a
@@ -692,11 +785,19 @@ def etape_menage(sync, client_ovh, cibles, fiche, adresse, garder):
     fait grossir le problème qu'on doit faire porter au client.
     """
     print()
-    print("8. Ménage")
+    print("9. Ménage")
     if garder:
         print("   – conservé sur demande (--garder) : fiche %s, abonnement %s"
               % (fiche["id"] if fiche else "aucune", adresse))
         return 0
+
+    if reponse:
+        client, identifiant = reponse
+        import requests as _r
+        r = _r.delete("%s/%s" % (client.base_url, identifiant),
+                      headers=client.headers, timeout=30)
+        print("   %s réponse de mise à jour %s"
+              % ("✅" if r.ok else "⚠ ", "supprimée" if r.ok else "à retirer à la main"))
     if not fiche:
         print("   – rien à retirer")
         return 0
@@ -931,8 +1032,12 @@ def parcours(args):
                              compteurs=sync._compteurs if args.appliquer else None,
                              livraison=livraison and args.appliquer,
                              chemin_rendu=args.rendu)
+        reponse = None
         if args.appliquer:
-            etape_menage(sync, client_ovh, cibles, fiche, cibles["adresse"], args.garder)
+            e, reponse = etape_mise_a_jour(sync, credentials, cibles, fiche, conf)
+            ecarts += e
+            etape_menage(sync, client_ovh, cibles, fiche, cibles["adresse"], args.garder,
+                         reponse)
     finally:
         os.unlink(chemin_temporaire)
 

@@ -799,3 +799,122 @@ class TestComplet:
         parcours.etape_adhesion(item, CONF)
 
         assert "que le code ne lit pas" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# La mise à jour de fiche — la seconde moitié du parcours cible
+# --------------------------------------------------------------------------
+
+class FauxTableReponses(FauxClientAirtable):
+    """La table « Mise à jour fiche », sans réseau."""
+
+    base_url = "https://api.airtable.com/v0/appBAC/Mise%20a%20jour%20fiche"
+
+    def __init__(self, depot_refuse=False, synchronise=True):
+        super().__init__()
+        self.depot_refuse = depot_refuse
+        self.synchronise = synchronise
+        self.deposees = []
+
+    def create_record(self, fields, dry_run=False):
+        if self.depot_refuse:
+            return None
+        self.deposees.append(fields)
+        return {"id": "recREP", "fields": fields}
+
+    def list_records(self, filter_by_formula=None, **_):
+        return [{"id": "recREP", "fields": {parcours.CHAMP_SYNCHRONISE: self.synchronise}}]
+
+
+def monter_mise_a_jour(monkeypatch, table, fiche_relue):
+    """Branche le client de la table de réponses et l'Annuaire relu."""
+    monkeypatch.setattr("src.clients.airtable_client.AirtableClient",
+                        lambda **_: table)
+    annuaire = FauxClientAirtable(fiche=fiche_relue)
+    sync = faux_sync(annuaire)
+    monkeypatch.setattr(parcours, "Reconciliation",
+                        lambda a, r: Mock(passer=Mock(return_value={
+                            "màj_reçues": 1, "màj_appliquées": 1, "erreurs": 0})))
+    return sync
+
+
+CREDS = {"airtable": {"api_key": "clé", "base_id": "appBAC"}}
+FICHE = {"id": "recFICHE", "fields": {"E-mail": "x@example.org"}}
+
+
+class TestMiseAJour:
+    def relue(self, **champs):
+        base = {"E-mail": "x@example.org",
+                "Fonction (structure)": parcours.CORRECTIONS["Fonction (structure)"],
+                "Genre": parcours.CORRECTIONS["Genre"],
+                parcours.CHAMP_DATE_MAJ: "2026-08-28"}
+        base.update(champs)
+        return {"id": "recFICHE", "fields": base}
+
+    def test_cas_nominal(self, monkeypatch, capsys):
+        table = FauxTableReponses()
+        sync = monter_mise_a_jour(monkeypatch, table, self.relue())
+
+        ecarts, reponse = parcours.etape_mise_a_jour(sync, CREDS, cibles(), FICHE, CONF)
+
+        assert ecarts == 0
+        assert reponse == (table, "recREP")
+        assert table.deposees[0][parcours.CHAMP_FICHE] == "recFICHE"
+
+    def test_la_reponse_designe_la_fiche_sans_passer_par_l_adresse(self, monkeypatch):
+        """Un rapprochement par adresse raterait les 7 fiches qui en portent
+        plusieurs dans « Mail optionnel »."""
+        table = FauxTableReponses()
+        sync = monter_mise_a_jour(monkeypatch, table, self.relue())
+
+        parcours.etape_mise_a_jour(sync, CREDS, cibles(), FICHE, CONF)
+
+        assert parcours.CHAMP_FICHE in table.deposees[0]
+
+    def test_sans_fiche_l_etape_est_un_ecart(self, monkeypatch):
+        table = FauxTableReponses()
+        sync = monter_mise_a_jour(monkeypatch, table, None)
+
+        ecarts, reponse = parcours.etape_mise_a_jour(sync, CREDS, cibles(), None, CONF)
+
+        assert (ecarts, reponse) == (1, None)
+
+    def test_table_absente_le_dit(self, monkeypatch, capsys):
+        table = FauxTableReponses(depot_refuse=True)
+        sync = monter_mise_a_jour(monkeypatch, table, self.relue())
+
+        ecarts, reponse = parcours.etape_mise_a_jour(sync, CREDS, cibles(), FICHE, CONF)
+
+        assert (ecarts, reponse) == (1, None)
+        assert "creer_table_mise_a_jour.py" in capsys.readouterr().out
+
+    def test_une_correction_non_appliquee_est_un_ecart(self, monkeypatch, capsys):
+        table = FauxTableReponses()
+        sync = monter_mise_a_jour(monkeypatch, table,
+                                  self.relue(**{"Fonction (structure)": "ancienne"}))
+
+        ecarts, _ = parcours.etape_mise_a_jour(sync, CREDS, cibles(), FICHE, CONF)
+
+        assert ecarts == 1
+        assert "Fonction (structure)" in capsys.readouterr().out
+
+    def test_suivi_non_renseigne_est_un_ecart(self, monkeypatch, capsys):
+        """Sans la date, l'adhérent serait relancé alors qu'il a répondu."""
+        table = FauxTableReponses()
+        sync = monter_mise_a_jour(monkeypatch, table,
+                                  self.relue(**{parcours.CHAMP_DATE_MAJ: None}))
+
+        ecarts, _ = parcours.etape_mise_a_jour(sync, CREDS, cibles(), FICHE, CONF)
+
+        assert ecarts == 1
+        assert "le suivi ne sait pas" in capsys.readouterr().out
+
+    def test_reponse_non_marquee_est_signalee_sans_etre_un_ecart(self, monkeypatch, capsys):
+        """Elle sera rejouée, et réécrire les mêmes valeurs est sans effet."""
+        table = FauxTableReponses(synchronise=False)
+        sync = monter_mise_a_jour(monkeypatch, table, self.relue())
+
+        ecarts, _ = parcours.etape_mise_a_jour(sync, CREDS, cibles(), FICHE, CONF)
+
+        assert ecarts == 0
+        assert "sera rejouée" in capsys.readouterr().out

@@ -410,6 +410,18 @@ class AirtableClient:
 
             fields[field_name] = ids
 
+    def normaliser_champs(self, fields: Dict) -> None:
+        """Applique le référentiel de valeurs à un payload, sur place.
+
+        Publique parce que `upsert_record` n'est pas le seul chemin d'écriture
+        depuis le 28/08/2026 : la réconciliation du formulaire de mise à jour
+        écrit par `update_record`, et elle a exactement le même besoin. Sans
+        elle, une valeur hors options ferait échouer l'écriture entière — le
+        code n'utilise pas `typecast`.
+        """
+        if self.normalized_fields:
+            self._apply_normalized_fields(fields)
+
     def _apply_normalized_fields(self, fields: Dict) -> None:
         """Ramène les champs à choix fermé sur leur valeur de référence.
 
