@@ -512,7 +512,8 @@ class AirtableClient:
                 if fallback:
                     fields[field_name] = fallback
 
-    def upsert_record(self, email: str, fields: Dict, dry_run: bool = False) -> Optional[Dict]:
+    def upsert_record(self, email: str, fields: Dict, dry_run: bool = False,
+                      colonnes_par_defaut=()) -> Optional[Dict]:
         """
         Create or update a record based on email (upsert operation).
 
@@ -520,6 +521,11 @@ class AirtableClient:
             email: Email address to use for lookup
             fields: Dictionary of field names and values (must include email)
             dry_run: If True, don't make actual API calls
+            colonnes_par_defaut: colonnes qui ne portent qu'une valeur par
+                défaut, faute de réponse. Écrites à la création, **retirées à la
+                mise à jour** : un défaut ne doit pas effacer ce qu'un adhérent a
+                saisi. Sans cette règle, une réadhésion défait le formulaire de
+                mise à jour de l'année précédente — mesuré le 28/08/2026.
 
         Returns:
             Created or updated record dict if successful, None otherwise
@@ -547,6 +553,18 @@ class AirtableClient:
 
             # Try to find existing record (also used for linked-record merge)
             existing_record = self.find_record_by_email(email)
+
+            if existing_record and colonnes_par_defaut:
+                retirees = sorted(c for c in colonnes_par_defaut if c in fields)
+                for colonne in retirees:
+                    del fields[colonne]
+                if retirees:
+                    syslog.syslog(
+                        syslog.LOG_INFO,
+                        "Upsert %s: %d colonne(s) par défaut non écrite(s) sur une "
+                        "fiche existante (%s)" % (email, len(retirees),
+                                                  ", ".join(retirees)),
+                    )
 
             # Resolve any configured linked-record fields (Groupe(s), Structure(s), …)
             # before sending. Merges with existing IDs on UPDATE.

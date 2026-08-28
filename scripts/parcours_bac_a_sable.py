@@ -1117,7 +1117,13 @@ def parcours(args):
                              livraison=livraison and args.appliquer,
                              chemin_rendu=args.rendu)
         reponse = None
-        if args.appliquer:
+        if args.appliquer and args.sans_maj:
+            print()
+            print("8. La mise à jour de fiche")
+            print("   – sautée (--sans-maj) : le lien du mail de bienvenue est la porte")
+            print("     qu'on éprouve ici, la remplir par l'API la fermerait.")
+            etape_menage(sync, client_ovh, cibles, fiche, cibles["adresse"], args.garder)
+        elif args.appliquer:
             e, reponse = etape_mise_a_jour(sync, credentials, cibles, fiche, conf,
                                            args.maj_formulaire)
             ecarts += e
@@ -1176,6 +1182,9 @@ def main():
                                    "(défaut : OVH_MAILING_LIST_BAC_A_SABLE, sinon bac-a-sable)")
     p.add_argument("--domaine", help="domaine de la liste (défaut : celui du config JSON)")
     p.add_argument("--formulaire", help="titre du formulaire HelloAsso de test")
+    p.add_argument("--sans-maj", action="store_true",
+                   help="sauter l'étape 8 : la fiche reste à mettre à jour, pour que le "
+                        "lien du mail de bienvenue soit la seule porte éprouvée")
     p.add_argument("--maj-formulaire", metavar="shrXXXX",
                    help="étape 8 : ouvrir le vrai formulaire de mise à jour prérempli "
                         "et attendre sa validation, au lieu de déposer la réponse par "

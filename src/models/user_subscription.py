@@ -89,6 +89,11 @@ class UserSubscription:
     
     # Optional fields from HelloAsso
     state: str = "Processed"
+
+    # Les questions auxquelles l'adhérent **n'a pas répondu** et qui ont reçu une
+    # valeur par défaut. Elles ne valent que pour une fiche neuve : écrasées sur
+    # une fiche existante, elles effacent ce que l'adhérent a corrigé lui-même.
+    champs_par_defaut: set = field(default_factory=set)
     
     def to_airtable_payload(self) -> Dict[str, str]:
         """
@@ -119,7 +124,22 @@ class UserSubscription:
                     payload[airtable_field] = value
         
         return payload
-    
+
+    def colonnes_par_defaut(self) -> set:
+        """Les colonnes Airtable qui ne portent qu'une valeur par défaut.
+
+        Mesuré le 28/08/2026 sur le bac à sable, en rejouant une réadhésion : la
+        seconde adhésion réécrivait `Genre` à « Non-précisé » et
+        `Partage de donnée autorisé` à « Non », par-dessus ce que l'adhérent
+        venait de saisir dans le formulaire de mise à jour. Depuis que HelloAsso
+        ne pose plus ces questions, **toute** adhésion arrive avec ces défauts :
+        le parcours de mise à jour se serait défait tout seul d'une année sur
+        l'autre.
+        """
+        return {colonne
+                for question, colonne in CHAMPS_HELLOASSO_VERS_AIRTABLE.items()
+                if _cle(question) in self.champs_par_defaut}
+
     @classmethod
     def from_hello_asso_item(
         cls,
@@ -160,10 +180,12 @@ class UserSubscription:
             custom_fields[_cle(field_data["name"])] = field_data["answer"]
         
         # Apply default fields
+        par_defaut = set()
         if default_fields:
             for key, value in default_fields.items():
                 if _cle(key) not in custom_fields:
                     custom_fields[_cle(key)] = value
+                    par_defaut.add(_cle(key))
         
         # Parse subscription date
         date_str = item["order"]["date"].split("+")[0].split(".")[0]
@@ -192,4 +214,5 @@ class UserSubscription:
             groupe=groupe,
             custom_fields=custom_fields,
             state=item["state"],
+            champs_par_defaut=par_defaut,
         )

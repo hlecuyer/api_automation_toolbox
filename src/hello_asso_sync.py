@@ -180,6 +180,7 @@ class SyncHelloAsso:
                     result = self.airtable_client.upsert_record(
                         email=subscription.email,
                         fields=fields,
+                        colonnes_par_defaut=subscription.colonnes_par_defaut(),
                     )
                 
                 if not result:
