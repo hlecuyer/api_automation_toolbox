@@ -325,6 +325,9 @@ class FauxClientAirtable:
             return None
         return {"id": record_id, "fields": fields}
 
+    def normaliser_champs(self, fields):
+        """Le référentiel du vrai client. Ici, sans effet."""
+
 
 def faux_sync(client):
     sync = Mock()

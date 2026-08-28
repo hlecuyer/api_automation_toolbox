@@ -67,7 +67,8 @@ from dotenv import load_dotenv
 
 from src import garde_fou_envoi
 from src.reconciliation import (CHAMP_DATE_MAJ, CHAMP_FICHE, CHAMP_SYNCHRONISE,
-                                 CORRESPONDANCE, Reconciliation)
+                                 CORRESPONDANCE, Reconciliation,
+                                 payload_depuis_reponse)
 from src.hello_asso_sync import SyncHelloAsso
 from src.models.user_subscription import (CHAMPS_BOOLEENS_AIRTABLE,
                                           CHAMPS_HELLOASSO_VERS_AIRTABLE)
@@ -708,7 +709,37 @@ CORRECTIONS = {
 }
 
 
-def etape_mise_a_jour(sync, credentials, cibles, fiche, conf):
+def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
+    """Le vrai formulaire, rempli par Hugo, dans son navigateur.
+
+    C'est la seule manière d'éprouver le **préremplissage** : l'API ne sait pas
+    soumettre un formulaire Airtable, et une réponse déposée par l'API prouve
+    tout ce qui vient après le formulaire, jamais le formulaire lui-même. Même
+    rapport que `--complet` entretient avec l'adhésion HelloAsso.
+    """
+    from src.lien_formulaire import url
+
+    lien = url(cibles["base"], formulaire, fiche)
+    print("   ·  ouvre ce lien, vérifie que tes données sont là, corrige, valide :")
+    print()
+    print("      %s" % lien)
+    print()
+    try:
+        input("   Entrée quand le formulaire est validé — ")
+    except EOFError:
+        print("   ❌ pas de terminal pour attendre la validation")
+        return None
+
+    trouvees = reponses.list_records(
+        filter_by_formula="{%s}='%s'" % (CHAMP_FICHE, fiche["id"]))
+    if not trouvees:
+        print("   ❌ aucune réponse ne désigne la fiche %s" % fiche["id"])
+        print("      Le formulaire préremplit-il « %s », et le masque-t-il ?" % CHAMP_FICHE)
+        return None
+    return trouvees[-1]
+
+
+def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):
     """L'adhérent corrige sa fiche, et la réconciliation la recopie.
 
     C'est la seconde moitié du parcours cible : le formulaire n'est pas rejoué
@@ -731,12 +762,27 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf):
         table_name=TABLE_REPONSES,
     )
 
-    depose = reponses.create_record(dict(CORRECTIONS, **{CHAMP_FICHE: fiche["id"]}))
-    if not depose:
-        print("   ❌ impossible de déposer une réponse dans « %s »" % TABLE_REPONSES)
-        print("      La table existe-t-elle ? scripts/creer_table_mise_a_jour.py")
-        return 1, None
-    print("   ✅ réponse déposée — %s, désignant la fiche %s" % (depose["id"], fiche["id"]))
+    if formulaire:
+        depose = _reponse_par_formulaire(reponses, cibles, fiche, formulaire)
+        if not depose:
+            return 1, None
+        print("   ✅ réponse reçue du formulaire — %s, désignant la fiche %s"
+              % (depose["id"], fiche["id"]))
+    else:
+        depose = reponses.create_record(dict(CORRECTIONS, **{CHAMP_FICHE: fiche["id"]}))
+        if not depose:
+            print("   ❌ impossible de déposer une réponse dans « %s »" % TABLE_REPONSES)
+            print("      La table existe-t-elle ? scripts/creer_table_mise_a_jour.py")
+            return 1, None
+        print("   ✅ réponse déposée — %s, désignant la fiche %s"
+              % (depose["id"], fiche["id"]))
+
+    # Ce qu'on vérifiera dans la fiche : les réponses réellement saisies, pas une
+    # liste écrite d'avance. Par le formulaire, on ne sait pas ce qu'Hugo a tapé
+    # — et c'est justement ce qu'on veut retrouver de l'autre côté.
+    attendus = payload_depuis_reponse(depose.get("fields", {}))
+    sync.airtable_client.normaliser_champs(attendus)
+    question = {colonne: libelle for libelle, colonne in CORRESPONDANCE.items()}
 
     compteurs = Reconciliation(sync.airtable_client, reponses).passer()
     print("   ·  passage : reçues=%(màj_reçues)s appliquées=%(màj_appliquées)s "
@@ -746,13 +792,15 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf):
     relue = sync.airtable_client.find_record_by_email(fiche["fields"].get("E-mail", ""))
     champs = (relue or {}).get("fields", {})
 
-    for libelle, attendu in CORRECTIONS.items():
-        colonne = CORRESPONDANCE[libelle]
+    if not attendus:
+        print("   ⚠  la réponse ne portait aucune valeur : rien à recopier")
+    for colonne, attendu in sorted(attendus.items()):
         if champs.get(colonne) == attendu:
-            print("   ✅ %-24s ← « %s »" % (colonne, libelle))
+            print("   ✅ %-24s ← « %s »" % (colonne, question.get(colonne, colonne)))
         else:
             print("   ❌ %-24s « %s », attendu « %s » (question « %s »)"
-                  % (colonne, champs.get(colonne), attendu, libelle))
+                  % (colonne, champs.get(colonne), attendu,
+                     question.get(colonne, colonne)))
             ecarts += 1
 
     if champs.get(CHAMP_DATE_MAJ):
@@ -1032,7 +1080,8 @@ def parcours(args):
                              chemin_rendu=args.rendu)
         reponse = None
         if args.appliquer:
-            e, reponse = etape_mise_a_jour(sync, credentials, cibles, fiche, conf)
+            e, reponse = etape_mise_a_jour(sync, credentials, cibles, fiche, conf,
+                                           args.maj_formulaire)
             ecarts += e
             etape_menage(sync, client_ovh, cibles, fiche, cibles["adresse"], args.garder,
                          reponse)
@@ -1086,6 +1135,10 @@ def main():
                                    "(défaut : OVH_MAILING_LIST_BAC_A_SABLE, sinon bac-a-sable)")
     p.add_argument("--domaine", help="domaine de la liste (défaut : celui du config JSON)")
     p.add_argument("--formulaire", help="titre du formulaire HelloAsso de test")
+    p.add_argument("--maj-formulaire", metavar="shrXXXX",
+                   help="étape 8 : ouvrir le vrai formulaire de mise à jour prérempli "
+                        "et attendre sa validation, au lieu de déposer la réponse par "
+                        "l'API. C'est ce qui éprouve le préremplissage.")
     p.add_argument("--config", default="config/hello-asso-automation-conf.json",
                    help="configuration dont le comportement est repris (champs liés, "
                         "champs calculés, référentiels)")
