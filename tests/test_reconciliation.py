@@ -23,9 +23,15 @@ from src.reconciliation import (
     payload_depuis_reponse,
 )
 
+# Les libellés du formulaire sont des phrases : ils ne peuvent pas être passés
+# en arguments nommés. Les quelques-uns dont ces tests ont besoin, écrits une
+# fois — et écrits en dur, parce que c'est le contrat que le module tient.
+Q_PRENOM = "Quel est votre prénom ?"
+Q_GENRE = "Quel est votre genre ?"
 
-def reponse(fiche="recFICHE", quand="2026-08-28T09:00:00.000Z", **champs):
-    fields = dict(champs)
+
+def reponse(champs=None, fiche="recFICHE", quand="2026-08-28T09:00:00.000Z"):
+    fields = dict(champs or {})
     if fiche is not None:
         fields[CHAMP_FICHE] = fiche
     return {"id": "recREP", "createdTime": quand, "fields": fields}
@@ -84,29 +90,34 @@ class TestPayload:
     def test_les_champs_techniques_ne_partent_pas(self):
         """`record_id` et `Synchronisé` décrivent la réponse, pas l'adhérent."""
         payload = payload_depuis_reponse(
-            {CHAMP_FICHE: "recX", CHAMP_SYNCHRONISE: True, "Prénom": "Prosper"})
+            {CHAMP_FICHE: "recX", CHAMP_SYNCHRONISE: True, Q_PRENOM: "Prosper"})
         assert payload == {"Prénom": "Prosper"}
 
     @pytest.mark.parametrize("vide", [None, "", [], {}])
     def test_une_reponse_vide_ne_touche_pas_la_colonne(self, vide):
         """Une case laissée blanche ne veut pas dire « efface ce que tu sais de
         moi ». C'est la règle la plus importante du module."""
-        assert payload_depuis_reponse({"Téléphone": vide}) == {}
+        assert payload_depuis_reponse(
+            {"À quel numéro peut-on vous joindre ?": vide}) == {}
 
     def test_un_faux_booleen_est_une_reponse(self):
         """`False` dit quelque chose, contrairement à une chaîne vide."""
-        assert payload_depuis_reponse({"Nom et prénom visibles sur le site": False}) == {
-            "Visible sur le site": False}
+        assert payload_depuis_reponse(
+            {"Souhaitez-vous que votre nom et votre prénom apparaissent sur le "
+             "site de la Coop ?": False}) == {"Visible sur le site": False}
 
     def test_un_zero_est_une_reponse(self):
-        assert payload_depuis_reponse({"Code postal": 0}) == {"code postal": 0}
+        assert payload_depuis_reponse(
+            {"Quel est votre code postal ?": 0}) == {"code postal": 0}
 
     def test_les_libelles_sont_traduits_en_colonnes(self):
         """Le formulaire pose des questions lisibles ; l'Annuaire porte des noms
         de colonnes. La correspondance est déclarée une seule fois."""
-        champs = {"Prénom": "P", "Votre structure": ["recS"],
-                  "Vous êtes plutôt": ["Chercheur·se"],
-                  "Deux personnes que vous connaissez à la Coop": "Nicole, Vera",
+        champs = {Q_PRENOM: "P",
+                  "Dans quelle structure travaillez-vous ?": ["recS"],
+                  "Vous êtes plutôt…": ["Chercheur·se"],
+                  "Quelles sont les deux personnes que vous connaissez le mieux "
+                  "à la Coop ?": "Nicole, Vera",
                   CHAMP_FICHE: "recX"}
         assert payload_depuis_reponse(champs) == {
             "Prénom": "P", "Structure(s)": ["recS"],
@@ -117,7 +128,7 @@ class TestPayload:
         faire échouer l'écriture des autres réponses : sans `typecast`, une
         colonne inexistante suffirait."""
         assert payload_depuis_reponse(
-            {"Prénom": "P", "Question ajoutée à la main": "oui"}) == {"Prénom": "P"}
+            {Q_PRENOM: "P", "Question ajoutée à la main": "oui"}) == {"Prénom": "P"}
 
     def test_toutes_les_colonnes_visees_sont_distinctes(self):
         """Deux questions qui viseraient la même colonne s'écraseraient l'une
@@ -133,7 +144,7 @@ class TestPayload:
 @patch("src.reconciliation.syslog")
 class TestPassage:
     def test_cas_nominal(self, _syslog):
-        compteurs, annuaire, reponses = passer([reponse(Prénom="Prosper")])
+        compteurs, annuaire, reponses = passer([reponse({Q_PRENOM: "Prosper"})])
 
         assert compteurs == {"màj_reçues": 1, "màj_appliquées": 1, "erreurs": 0}
         fiche, champs = annuaire.ecritures[0]
@@ -155,7 +166,7 @@ class TestPassage:
     def test_le_referentiel_est_applique(self, _syslog):
         """Sans `typecast`, une valeur hors options fait échouer l'écriture
         entière. Le référentiel de l'Annuaire vaut donc aussi ici."""
-        _, annuaire, _ = passer([reponse(Genre="H")])
+        _, annuaire, _ = passer([reponse({Q_GENRE: "H"})])
         assert annuaire.ecritures[0][1]["Genre"] == "Masculin"
 
     def test_une_reponse_entierement_vide_est_quand_meme_un_acte(self, _syslog):
@@ -171,7 +182,7 @@ class TestPassage:
 @patch("src.reconciliation.syslog")
 class TestResistance:
     def test_une_reponse_sans_fiche_est_une_erreur_pas_une_panne(self, _syslog):
-        compteurs, annuaire, reponses = passer([reponse(fiche=None, Prénom="P")])
+        compteurs, annuaire, reponses = passer([reponse({Q_PRENOM: "P"}, fiche=None)])
 
         assert compteurs == {"màj_reçues": 1, "màj_appliquées": 0, "erreurs": 1}
         assert annuaire.ecritures == []
@@ -182,11 +193,11 @@ class TestResistance:
         refusée privait les 24 listes de synchronisation."""
         lignes = [
             {"id": "r1", "createdTime": "2026-08-28T09:00:00.000Z",
-             "fields": {CHAMP_FICHE: "recA", "Prénom": "A"}},
+             "fields": {CHAMP_FICHE: "recA", Q_PRENOM: "A"}},
             {"id": "r2", "createdTime": "2026-08-28T09:00:00.000Z",
-             "fields": {"Prénom": "B"}},                      # sans record_id
+             "fields": {Q_PRENOM: "B"}},                      # sans record_id
             {"id": "r3", "createdTime": "2026-08-28T09:00:00.000Z",
-             "fields": {CHAMP_FICHE: "recC", "Prénom": "C"}},
+             "fields": {CHAMP_FICHE: "recC", Q_PRENOM: "C"}},
         ]
         compteurs, annuaire, _ = passer(lignes)
 
@@ -210,7 +221,7 @@ class TestResistance:
     def test_ecriture_refusee_la_reponse_reste_a_retenter(self, _syslog):
         """Ne pas marquer une réponse qu'on n'a pas su appliquer : le passage
         suivant la rejouera, et l'erreur reste visible dans la ligne de vie."""
-        compteurs, _, reponses = passer([reponse(Prénom="P")], refuse={"recFICHE"})
+        compteurs, _, reponses = passer([reponse({Q_PRENOM: "P"})], refuse={"recFICHE"})
 
         assert compteurs["erreurs"] == 1
         assert reponses.marquees == []
@@ -218,7 +229,7 @@ class TestResistance:
     def test_marquage_refuse_la_fiche_reste_a_jour(self, _syslog):
         """La fiche est écrite, la réponse sera rejouée : réécrire les mêmes
         valeurs est sans effet, donc rien n'est perdu."""
-        compteurs, annuaire, _ = passer([reponse(Prénom="P")], refuse_marquage=True)
+        compteurs, annuaire, _ = passer([reponse({Q_PRENOM: "P"})], refuse_marquage=True)
 
         assert compteurs["màj_appliquées"] == 1
         assert annuaire.ecritures[0][1]["Prénom"] == "P"
@@ -235,7 +246,7 @@ class TestResistance:
 @patch("src.reconciliation.syslog")
 class TestSimulation:
     def test_le_dry_run_n_ecrit_rien(self, _syslog):
-        compteurs, annuaire, reponses = passer([reponse(Prénom="P")], dry_run=True)
+        compteurs, annuaire, reponses = passer([reponse({Q_PRENOM: "P"})], dry_run=True)
 
         assert compteurs["màj_appliquées"] == 1
         assert annuaire.ecritures == []

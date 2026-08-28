@@ -702,8 +702,10 @@ TABLE_REPONSES = "Mise à jour fiche"
 # c'est ce que dépose une vraie soumission. La colonne visée se lit dans
 # CORRESPONDANCE, de sorte que renommer une question ne casse pas ce parcours en
 # silence.
-CORRECTIONS = {"Votre fonction dans cette structure": "Fonction corrigée par l'adhérent",
-               "Genre": "Féminin"}
+CORRECTIONS = {
+    "Quelle est votre fonction dans cette structure ?": "Fonction corrigée par l'adhérent",
+    "Quel est votre genre ?": "Féminin",
+}
 
 
 def etape_mise_a_jour(sync, credentials, cibles, fiche, conf):

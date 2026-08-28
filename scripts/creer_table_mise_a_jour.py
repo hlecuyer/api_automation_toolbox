@@ -163,22 +163,49 @@ def champs_voulus(source, tables_par_nom):
     return voulus, manquants
 
 
-def renommages(cible):
-    """Les champs encore nommés comme la colonne qu'ils visent.
+# Les noms qu'un champ a déjà portés, par colonne visée.
+#
+# Une table Airtable ne garde aucune trace de la colonne qu'un champ vise : son
+# identité, c'est son nom. Renommer une question demande donc de dire d'où elle
+# vient, sinon le script recrée un champ neuf à côté et les réponses déjà
+# saisies restent dans l'ancien.
+#
+# Deux vagues : la table a d'abord été posée avec les noms de colonnes de
+# l'Annuaire, puis avec des libellés courts, avant qu'on s'avise qu'un
+# formulaire les affiche tels quels et qu'un intitulé se lit mieux en phrase.
+ANCIENS_LIBELLES = {
+    "E-mail": ["Adresse e-mail"],
+    "Mail optionnel": ["Autre adresse e-mail"],
+    "date de naissance": ["Date de naissance"],
+    "code postal": ["Code postal"],
+    "Structure(s)": ["Votre structure"],
+    "Fonction (structure)": ["Votre fonction dans cette structure"],
+    "Intérêts": ["Vos centres d'intérêt"],
+    "2 personnes connues": ["Deux personnes que vous connaissez à la Coop"],
+    "Type": ["Vous êtes plutôt"],
+    "Année de première adhésion": ["Année de votre première adhésion"],
+    "Visible sur le site": ["Nom et prénom visibles sur le site"],
+    "Partage de donnée autorisé": ["Informations partagées avec les autres adhérent·es"],
+}
 
-    La table a d'abord été posée le 28/08/2026 avec les noms de colonnes de
-    l'Annuaire, avant qu'on s'avise qu'un formulaire affiche ces noms tels quels
-    et qu'« Partage de donnée autorisé » n'est pas une question. Ce bloc fait la
-    bascule, une fois, sans perdre les réponses déjà saisies.
+
+def renommages(cible):
+    """Les champs qui portent encore un nom d'avant, à basculer sur le libellé.
+
+    Un renommage préserve les réponses déjà saisies, contrairement à une
+    création suivie d'une suppression. C'est pour ça que ce passage existe
+    plutôt que de laisser le script poser un champ neuf.
     """
     par_nom = {c["name"]: c for c in cible["fields"]}
     a_renommer = []
     for libelle, colonne, _ in CHAMPS_FORMULAIRE:
-        if libelle == colonne:
+        if libelle in par_nom:
             continue
-        ancien = par_nom.get(colonne)
-        if ancien and libelle not in par_nom:
-            a_renommer.append((ancien["id"], colonne, libelle))
+        for ancien_nom in [colonne] + ANCIENS_LIBELLES.get(colonne, []):
+            ancien = par_nom.get(ancien_nom)
+            if ancien:
+                a_renommer.append((ancien["id"], ancien_nom, libelle))
+                break
     return a_renommer
 
 
@@ -192,7 +219,7 @@ def imprimer_spec(voulus):
     print()
     vise = {libelle: colonne for libelle, colonne, _ in CHAMPS_FORMULAIRE}
     for i, champ in enumerate(voulus, 1):
-        ligne = "%2d. %-52s %-20s" % (i, champ["name"], champ["type"])
+        ligne = "%2d. %-68s %-20s" % (i, champ["name"], champ["type"])
         if champ["name"] in vise:
             ligne += " → %s" % vise[champ["name"]]
         options = champ.get("options") or {}
@@ -206,9 +233,10 @@ def imprimer_spec(voulus):
     print("  · « %s » est prérempli et **masqué** (hide_%s=true dans l'URL) ;"
           % (CHAMP_FICHE, CHAMP_FICHE))
     print("  · « %s » n'apparaît pas dans le formulaire ;" % CHAMP_SYNCHRONISE)
-    print("  · « Votre structure » est limité à une **vue filtrée** de Structures,")
-    print("    sans autorisation d'en créer une nouvelle — c'est là que se gagne")
-    print("    la qualité de la donnée, 577 structures pour 29 sites web.")
+    print("  · la question sur la structure est limitée à une **vue filtrée**")
+    print("    de Structures, sans autorisation d'en créer une nouvelle —")
+    print("    c'est là que se gagne la qualité de la donnée, 577 structures")
+    print("    pour 29 sites web.")
 
 
 # --------------------------------------------------------------------------
@@ -310,7 +338,7 @@ def main():
     if not cible:
         print("→ créer la table « %s » avec ses %d champs" % (TABLE_CIBLE, len(voulus)))
         for champ in voulus:
-            print("     + %-28s %s" % (champ["name"], champ["type"]))
+            print("     + %-68s %s" % (champ["name"], champ["type"]))
         if not args.appliquer:
             print()
             print("Simulation. Rien n'est écrit. Relancer avec --appliquer.")
@@ -330,7 +358,7 @@ def main():
     if a_renommer:
         print("→ renommer %d champ(s) en libellé de question" % len(a_renommer))
         for _, ancien, nouveau in a_renommer:
-            print("     %-28s → %s" % (ancien, nouveau))
+            print("     %-44s → %s" % (ancien, nouveau))
         if args.appliquer:
             for champ_id, _, nouveau in a_renommer:
                 at.modifier_champ(cible["id"], champ_id, name=nouveau)
@@ -354,7 +382,7 @@ def main():
         return 0
 
     for champ in a_poser:
-        print("   + %-28s %s" % (champ["name"], champ["type"]))
+        print("   + %-68s %s" % (champ["name"], champ["type"]))
     if not args.appliquer:
         print()
         print("Simulation. Rien n'est écrit. Relancer avec --appliquer.")
@@ -433,8 +461,8 @@ def _rappel_formulaire():
     print("Reste à faire dans l'interface — l'API ne crée pas de formulaire :")
     print("  1. construire le formulaire sur cette table ;")
     print("  2. masquer « %s » et « %s » ;" % (CHAMP_FICHE, CHAMP_SYNCHRONISE))
-    print("  3. limiter « Votre structure » à une vue filtrée de Structures, sans")
-    print("     autorisation d'en créer une nouvelle ;")
+    print("  3. limiter la question sur la structure à une vue filtrée de")
+    print("     Structures, sans autorisation d'en créer une nouvelle ;")
     print("  4. reporter l'identifiant du formulaire (shrXXXX) dans la formule")
     print("     « lien personnalisé formulaire » de l'Annuaire.")
 

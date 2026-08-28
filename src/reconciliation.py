@@ -49,10 +49,11 @@ CHAMPS_TECHNIQUES = (CHAMP_FICHE, CHAMP_SYNCHRONISE)
 #
 # `(libellé, colonne de l'Annuaire, explication)`.
 #
-# **Le libellé n'est pas le nom de la colonne, et c'est délibéré.** Un formulaire
-# Airtable affiche le nom du champ comme intitulé de question : « 2 personnes
-# connues », « code postal », « Partage de donnée autorisé » sont des noms de
-# colonnes tenus par une gestionnaire, pas des questions posées à un adhérent.
+# **Le libellé est une phrase, pas un nom de colonne, et c'est délibéré.** Un
+# formulaire Airtable affiche le nom du champ comme intitulé de question : « 2
+# personnes connues », « code postal », « Partage de donnée autorisé » sont des
+# noms tenus par une gestionnaire, pas des questions posées à un adhérent. On
+# écrit donc la question en toutes lettres, et l'explication vient sous elle.
 #
 # Le prix de cette lisibilité est une correspondance à tenir, là où des noms
 # identiques n'en demandaient aucune. Elle est donc déclarée **ici et nulle part
@@ -60,43 +61,39 @@ CHAMPS_TECHNIQUES = (CHAMP_FICHE, CHAMP_SYNCHRONISE)
 # champs, ce module pour les relire. Les deux ne peuvent pas diverger puisqu'ils
 # lisent la même liste, et le script vérifie à chaque passage que chaque colonne
 # visée existe bien dans l'Annuaire.
-#
-# L'explication devient la description du champ, affichée sous la question dans
-# le formulaire. Pour les deux consentements, c'est le libellé exact du
-# formulaire HelloAsso : même question, même formulation, rien qui change de sens
-# en changeant de support.
 CHAMPS_FORMULAIRE = [
-    ("Nom", "Nom", ""),
-    ("Prénom", "Prénom", ""),
-    ("Adresse e-mail", "E-mail",
-     "Celle à laquelle la Coop vous écrit."),
-    ("Autre adresse e-mail", "Mail optionnel",
+    ("Quel est votre nom ?", "Nom", ""),
+    ("Quel est votre prénom ?", "Prénom", ""),
+    ("À quelle adresse e-mail la Coop peut-elle vous écrire ?", "E-mail",
+     "C'est à cette adresse que partiront les messages de la Coop."),
+    ("Avez-vous une autre adresse e-mail ?", "Mail optionnel",
      "Facultatif. Une adresse de secours, si vous en avez une."),
-    ("Téléphone", "Téléphone", "Facultatif."),
-    ("Genre", "Genre", ""),
-    ("Date de naissance", "date de naissance", "Facultatif."),
-    ("Code postal", "code postal",
+    ("À quel numéro peut-on vous joindre ?", "Téléphone", "Facultatif."),
+    ("Quel est votre genre ?", "Genre", ""),
+    ("Quelle est votre date de naissance ?", "date de naissance", "Facultatif."),
+    ("Quel est votre code postal ?", "code postal",
      "Nous sert à savoir où se trouvent les adhérent·es, rien de plus."),
-    ("Votre structure", "Structure(s)",
-     "L'organisation dans laquelle vous travaillez ou que vous représentez. "
-     "Choisissez-la dans la liste ; si elle n'y est pas, laissez vide et "
+    ("Dans quelle structure travaillez-vous ?", "Structure(s)",
+     "Choisissez-la dans la liste. Si elle n'y figure pas, laissez vide et "
      "dites-le nous."),
-    ("Votre fonction dans cette structure", "Fonction (structure)", ""),
-    ("Vos centres d'intérêt", "Intérêts",
+    ("Quelle est votre fonction dans cette structure ?", "Fonction (structure)", ""),
+    ("Quels sont vos centres d'intérêt ?", "Intérêts",
      "Quelques mots-clés suffisent."),
-    ("Deux personnes que vous connaissez à la Coop", "2 personnes connues",
+    ("Quelles sont les deux personnes que vous connaissez le mieux à la Coop ?",
+     "2 personnes connues",
      "Surtout utile s'il s'agit de votre première adhésion."),
-    ("Vous êtes plutôt", "Type", ""),
-    ("Année de votre première adhésion", "Année de première adhésion",
+    ("Vous êtes plutôt…", "Type", ""),
+    ("En quelle année avez-vous adhéré à la Coop pour la première fois ?",
+     "Année de première adhésion",
      "Si vous ne vous en souvenez pas, laissez vide."),
-    ("Nom et prénom visibles sur le site", "Visible sur le site",
-     "Je souhaite que mon Nom et Prénom soient partagés sur le site web de "
-     "l'association dans la liste des adhérent·es."),
-    ("Informations partagées avec les autres adhérent·es", "Partage de donnée autorisé",
-     "Souhaitez-vous partager les informations précédentes avec les autres "
-     "adhérent·es de la Coop des Communs ? Pour information, les champs suivants "
-     "seront uniquement accessibles par l'équipe de gestion de l'association et "
-     "les prestataires missionnés."),
+    ("Souhaitez-vous que votre nom et votre prénom apparaissent sur le site de "
+     "la Coop ?", "Visible sur le site",
+     "Ils figureraient dans la liste des adhérent·es publiée sur le site de "
+     "l'association."),
+    ("Souhaitez-vous partager ces informations avec les autres adhérent·es ?",
+     "Partage de donnée autorisé",
+     "Sinon, les champs ci-dessus restent accessibles uniquement à l'équipe de "
+     "gestion de l'association et aux prestataires missionnés."),
 ]
 
 # Les deux consentements. Texte dans l'Annuaire, liste Oui/Non dans le
