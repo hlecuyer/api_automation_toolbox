@@ -72,6 +72,12 @@ CHAMPS_SUIVI_ANNUAIRE = [
      "description": "Renseigné par la réconciliation quand l'adhérent a validé "
                     "le formulaire de mise à jour. Vide = il ne l'a pas fait, "
                     "donc il est relançable."},
+    {"name": "Lien envoyé le", "type": "date",
+     "options": {"dateFormat": {"name": "european"}},
+     "description": "Le jour où l'adhérent a reçu le lien vers le formulaire, "
+                    "posé par la synchro après l'envoi du mail. C'est l'ancrage "
+                    "des relances : « Date d'adhésion » est un lastModifiedTime "
+                    "malgré son nom, il dit quand la fiche a bougé."},
     {"name": "Dernière relance le", "type": "date",
      "options": {"dateFormat": {"name": "european"}},
      "description": "Renseigné par la relance. Empêche un second envoi le même "
@@ -439,8 +445,8 @@ def _poser_suivi(at, annuaire, appliquer):
     existants = {c["name"] for c in annuaire["fields"]}
     a_poser = [c for c in CHAMPS_SUIVI_ANNUAIRE if c["name"] not in existants]
     if not a_poser:
-        print("suivi : « %s » et « %s » déjà dans l'%s"
-              % (CHAMPS_SUIVI_ANNUAIRE[0]["name"], CHAMPS_SUIVI_ANNUAIRE[1]["name"],
+        print("suivi : %s déjà dans l'%s"
+              % (", ".join("« %s »" % c["name"] for c in CHAMPS_SUIVI_ANNUAIRE),
                  TABLE_SOURCE))
         return
     print("→ poser %d champ(s) de suivi dans l'%s" % (len(a_poser), TABLE_SOURCE))

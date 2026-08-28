@@ -13,7 +13,7 @@ from src.clients import (
     OVHEmailClient,
 )
 from src.models import UserSubscription
-from src.lien_formulaire import CHAMP_LIEN
+from src.lien_formulaire import CHAMP_LIEN, CHAMP_LIEN_ENVOYE
 from src.templates import welcome_email
 from src import heartbeat
 
@@ -116,6 +116,26 @@ class SyncHelloAsso:
                 f"Welcome email logo not found at {welcome_email.LOGO_PATH} — emails will be sent without inline logo",
             )
 
+
+    def _noter_lien_envoye(self, record, lien, dry_run):
+        """Pose le jour où l'adhérent a reçu son lien.
+
+        C'est l'ancrage des relances, et la seule date qui dise vraiment quelque
+        chose ici : `Date d'adhésion` est un `lastModifiedTime` malgré son nom,
+        que la réconciliation remet à zéro à chaque mise à jour de fiche.
+
+        Écrite après l'envoi, jamais avant : une date posée sur un mail qui n'est
+        pas parti ferait taire la relance pour quelqu'un qui n'a jamais rien reçu.
+        """
+        if not lien or dry_run or not isinstance(record, dict):
+            return
+        if not self.airtable_client.update_record(
+                record["id"], {CHAMP_LIEN_ENVOYE: datetime.now().strftime("%Y-%m-%d")}):
+            syslog.syslog(
+                syslog.LOG_WARNING,
+                "Update link sent but %r not written on record %s: this member will "
+                "never be reminded" % (CHAMP_LIEN_ENVOYE, record["id"]),
+            )
 
     def _lien_de_mise_a_jour(self, record):
         """Le lien prérempli vers le formulaire, lu dans la fiche.
@@ -235,6 +255,7 @@ class SyncHelloAsso:
                                 syslog.LOG_INFO,
                                 f"Confirmation email sent to {subscription.email}",
                             )
+                            self._noter_lien_envoye(result, lien, email_dry_run)
                         else:
                             self._compteurs["erreurs"] += 1
                             syslog.syslog(

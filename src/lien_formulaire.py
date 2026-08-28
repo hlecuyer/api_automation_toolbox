@@ -35,6 +35,11 @@ RACINE = "https://airtable.com"
 # de bienvenue — pas `url()`, qui ne sert qu'à éprouver le parcours.
 CHAMP_LIEN = "lien personnalisé formulaire"
 
+# Le jour où l'adhérent a reçu ce lien. C'est l'ancrage des relances : le champ
+# `Date d'adhésion` de l'`Annuaire` est un `lastModifiedTime` malgré son nom, il
+# dit quand la fiche a bougé et non quand quelqu'un a adhéré.
+CHAMP_LIEN_ENVOYE = "Lien envoyé le"
+
 # Les colonnes date : Airtable les rend en date-heure ISO dans une formule, et le
 # formulaire n'en veut que le jour.
 COLONNES_DATE = ("date de naissance",)
