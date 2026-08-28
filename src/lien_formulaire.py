@@ -31,6 +31,10 @@ from src.reconciliation import CHAMP_FICHE, CHAMPS_FORMULAIRE
 
 RACINE = "https://airtable.com"
 
+# Le champ formule de l'`Annuaire` qui porte le lien. C'est lui que lit le mail
+# de bienvenue — pas `url()`, qui ne sert qu'à éprouver le parcours.
+CHAMP_LIEN = "lien personnalisé formulaire"
+
 # Les colonnes date : Airtable les rend en date-heure ISO dans une formule, et le
 # formulaire n'en veut que le jour.
 COLONNES_DATE = ("date de naissance",)

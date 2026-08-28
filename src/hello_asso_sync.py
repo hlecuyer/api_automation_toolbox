@@ -13,6 +13,7 @@ from src.clients import (
     OVHEmailClient,
 )
 from src.models import UserSubscription
+from src.lien_formulaire import CHAMP_LIEN
 from src.templates import welcome_email
 from src import heartbeat
 
@@ -116,6 +117,32 @@ class SyncHelloAsso:
             )
 
 
+    def _lien_de_mise_a_jour(self, record):
+        """Le lien prérempli vers le formulaire, lu dans la fiche.
+
+        Il vient du champ formule de l'`Annuaire`, pas du code : c'est Airtable
+        qui le calcule, pour chaque fiche, en permanence. Une question ajoutée au
+        formulaire suit sans redéploiement, et le lien reste juste même pour une
+        fiche modifiée à la main.
+
+        Rend `None` plutôt que de lever. Un lien manquant fait partir le mail
+        sans le bloc — l'adhésion ne doit jamais échouer pour ça, même règle que
+        la signature. Le syslog le dit, parce qu'un mail de bienvenue sans lien
+        est un adhérent qui ne mettra jamais sa fiche à jour.
+        """
+        if not isinstance(record, dict):
+            return None
+        lien = (record.get("fields") or {}).get(CHAMP_LIEN)
+        if lien:
+            return lien
+        syslog.syslog(
+            syslog.LOG_WARNING,
+            "Welcome email without update link: field %r is empty on record %s"
+            % (CHAMP_LIEN, record.get("id")),
+        )
+        return None
+
+
     def sync_subscriptions(
         self,
         subscriptions: list[UserSubscription],
@@ -182,7 +209,9 @@ class SyncHelloAsso:
                     try:
                         # dry_run pour send_email : True si mode "full", "only_mail", ou "only_airtable", False sinon
                         email_dry_run = self.dry_run in ("full", "only_mail", "only_airtable")
-                        body_text, body_html = welcome_email.render(subscription.first_name)
+                        lien = self._lien_de_mise_a_jour(result)
+                        body_text, body_html = welcome_email.render(
+                            subscription.first_name, lien)
                         envoye = self.ovh_email_client.send_email(
                             sender=email_config["from"],
                             to=[subscription.email],

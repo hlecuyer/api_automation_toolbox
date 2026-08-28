@@ -20,7 +20,7 @@ Merci d'apporter ton soutien à La Coop des Communs en ayant adhéré ou réadh�
 
 C'est une chance pour nous.
 
-
+{bloc_maj}
 À NOTER DANS TON AGENDA
 - 12 juin (après-midi) — Assemblée générale
 - 13 juin (journée)    — Nos 10 ans, en présence à Paris
@@ -82,7 +82,7 @@ BODY_HTML = """<html>
                             <p style="margin: 0;">C'est une chance pour nous.</p>
                         </td>
                     </tr>
-
+{bloc_maj}
                     <tr>
                         <td style="padding: 16px 32px 0 32px;">
                             <table width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#eef9fc; border-left: 4px solid #3CB1D4; border-radius: 4px;">
@@ -181,13 +181,50 @@ BODY_HTML = """<html>
 """
 
 
-def render(first_name: str) -> tuple[str, str]:
+# Le bloc « mets tes informations à jour », inséré seulement quand on a le lien.
+#
+# C'est la seule porte du parcours de mise à jour : l'adhérent ne la trouvera
+# nulle part ailleurs. Mais un lien manquant ne doit jamais faire échouer une
+# adhésion — même règle que la signature. Sans lien, le mail part sans le bloc,
+# et l'appelant le signale.
+BLOC_MAJ_TEXT = """VÉRIFIE TES INFORMATIONS
+
+Prends une minute pour vérifier ce que nous savons de toi, et le corriger
+si besoin. Le formulaire est déjà rempli avec tes informations :
+{lien}
+
+"""
+
+BLOC_MAJ_HTML = """                    <tr>
+                        <td style="padding: 24px 32px 0 32px;">
+                            <table width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#eef9fc; border-radius: 4px;">
+                                <tr>
+                                    <td style="padding: 18px;" align="center">
+                                        <p style="margin:0 0 12px 0;">Prends une minute pour vérifier ce que nous savons de toi, et le corriger si besoin. Le formulaire est déjà rempli avec tes informations.</p>
+                                        <a href="{lien}" style="display:inline-block; padding: 12px 24px; background-color:#3CB1D4; color:#ffffff; text-decoration:none; border-radius: 4px; font-weight: bold;">Vérifier mes informations</a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+"""
+
+
+def render(first_name: str, lien: str = None) -> tuple[str, str]:
     """Render the welcome email body for a given first name.
+
+    Args:
+        first_name: le prénom de l'adhérent.
+        lien: le lien prérempli vers le formulaire de mise à jour, lu dans le
+            champ formule de la fiche. Absent, le mail part sans le bloc plutôt
+            que de faire échouer l'adhésion.
 
     Returns:
         (body_text, body_html) tuple with `{first_name}` substituted.
     """
     safe_name = (first_name or "").strip() or "à toi"
+    bloc_text = BLOC_MAJ_TEXT.format(lien=lien) if lien else ""
+    bloc_html = BLOC_MAJ_HTML.format(lien=lien) if lien else ""
     # La signature est substituée APRÈS le `.format()`, et non avant : dans l'autre
     # ordre, une accolade dans une valeur de signature (un nom entre parenthèses
     # typographiques, une fonction entre crochets) est vue par `.format()` comme un
@@ -195,6 +232,8 @@ def render(first_name: str) -> tuple[str, str]:
     # l'adhésion échoue. Les sentinelles ne contiennent pas d'accolade, elles
     # traversent donc `.format()` intactes.
     return (
-        signature.appliquer(BODY_TEXT.format(first_name=safe_name)),
-        signature.appliquer(BODY_HTML.format(first_name=safe_name)),
+        signature.appliquer(BODY_TEXT.format(first_name=safe_name,
+                                             bloc_maj=bloc_text)),
+        signature.appliquer(BODY_HTML.format(first_name=safe_name,
+                                             bloc_maj=bloc_html)),
     )
