@@ -39,8 +39,40 @@ CHAMPS_HELLOASSO_VERS_AIRTABLE = {
     "Souhaitez-vous partager les informations précédentes avec les autres adhérent·es de la Coop des Communs ? Pour information, les champs suivants seront uniquement accessibles par l'équipe de gestion de l'association et les prestataires missionnés.": "Partage de donnée autorisé",
     "Si oui, pouvez-vous nous indiquer deux personnes connues au sein de l'association ?": "2 personnes connues",
     "Est-ce votre première adhésion à la coop des communs ?": "Année de première adhésion",
-    "Règles de Confidentialité": "Règles de Confidentialité",
+    # Le libellé complet, tel que le formulaire le pose. La clé était
+    # « Règles de Confidentialité » — un nom de colonne Airtable, pas une
+    # question — et ne rencontrait donc jamais rien. Aucun message d'erreur :
+    # 84 consentements de l'année 2026 non enregistrés, découverts le
+    # 27/08/2026 en comparant le formulaire au code.
+    "J'accepte les règles de confidentialité de La Coop des Communs, disponibles à cette adresse : https://coopdescommuns.org/fr/confidentialite/": "Règles de Confidentialité",
 }
+
+# Colonnes Airtable de type « case à cocher », qui n'acceptent qu'un booléen.
+#
+# Cette déclaration vit dans le code, avec le mappage, et non dans la
+# configuration : les deux moitiés du correctif doivent voyager ensemble. Corriger
+# le libellé ci-dessus sans convertir la valeur ferait écrire la chaîne « Oui »
+# dans une case à cocher ; comme le code n'utilise pas `typecast`, Airtable
+# refuserait **l'écriture entière** et `hello_asso_sync` abandonnerait l'adhésion
+# complète — fiche, liste de diffusion et mail de bienvenue compris — pour un
+# champ secondaire. Mesuré le 28/08/2026 dans le bac à sable, pas supposé :
+#   INVALID_VALUE_FOR_COLUMN — Field "Règles de Confidentialité" cannot accept
+#   the provided value
+# Les deux autres questions Oui/Non du formulaire (« Visible sur le site »,
+# « Partage de donnée autorisé ») ne sont pas des cases à cocher : elles
+# acceptent la chaîne, vérifié au même passage.
+CHAMPS_BOOLEENS_AIRTABLE = {"Règles de Confidentialité"}
+
+# Ce qu'une réponse HelloAsso veut dire pour une case à cocher. Une valeur
+# inconnue n'est pas devinée : elle laisse la case décochée, ce qui est le sens
+# prudent d'un consentement.
+REPONSES_VRAIES = {"oui", "yes", "true", "1"}
+
+
+def _booleen(valeur):
+    if isinstance(valeur, bool):
+        return valeur
+    return str(valeur).strip().lower() in REPONSES_VRAIES
 
 
 @dataclass
@@ -82,6 +114,8 @@ class UserSubscription:
                 value = self.custom_fields[_cle(helloasso_field)]
                 # N'ajouter que si la valeur n'est pas vide
                 if value:
+                    if airtable_field in CHAMPS_BOOLEENS_AIRTABLE:
+                        value = _booleen(value)
                     payload[airtable_field] = value
         
         return payload

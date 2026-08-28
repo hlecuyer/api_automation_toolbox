@@ -183,7 +183,7 @@ class SyncHelloAsso:
                         # dry_run pour send_email : True si mode "full", "only_mail", ou "only_airtable", False sinon
                         email_dry_run = self.dry_run in ("full", "only_mail", "only_airtable")
                         body_text, body_html = welcome_email.render(subscription.first_name)
-                        self.ovh_email_client.send_email(
+                        envoye = self.ovh_email_client.send_email(
                             sender=email_config["from"],
                             to=[subscription.email],
                             subject=email_config.get("subject", welcome_email.SUBJECT),
@@ -192,10 +192,26 @@ class SyncHelloAsso:
                             inline_images=self.logo_inline_images,
                             dry_run=email_dry_run,
                         )
-                        syslog.syslog(
-                            syslog.LOG_INFO,
-                            f"Confirmation email sent to {subscription.email}",
-                        )
+                        # `send_email` ne lève pas quand elle échoue : elle rend
+                        # False. SMTP non configuré, expéditeur invalide, refus du
+                        # garde-fou — dans tous ces cas le log disait
+                        # « Confirmation email sent » et le compteur d'erreurs
+                        # restait à zéro. C'est exactement la forme de silence qui
+                        # a laissé seize suppressions quotidiennes passer inaperçues
+                        # pendant des mois : l'échec et le succès écrivaient la même
+                        # chose.
+                        if envoye:
+                            syslog.syslog(
+                                syslog.LOG_INFO,
+                                f"Confirmation email sent to {subscription.email}",
+                            )
+                        else:
+                            self._compteurs["erreurs"] += 1
+                            syslog.syslog(
+                                syslog.LOG_ERR,
+                                f"Confirmation email NOT sent to {subscription.email} "
+                                f"(send_email a rendu False — voir les lignes précédentes)",
+                            )
                     except Exception as e:
                         self._compteurs["erreurs"] += 1
                         syslog.syslog(

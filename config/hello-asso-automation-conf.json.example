@@ -1,6 +1,6 @@
 {
     "conf": {
-        "cotisation_label": "Payé 2025",
+        "cotisation_label": "Payé 2026",
         "groupe": "Adhérent·es la Coop des Communs",
         "helloAsso": {
             "api_url": "https://api.helloasso.com",
@@ -15,10 +15,10 @@
                 "Structure": ""
             },
             "first_sub_field": "Est-ce votre première adhésion à la coop des communs ?",
-            "form_name": "Adhésion année 2025",
+            "form_name": "Adhésion année 2026",
             "name_field": "Nom",
             "organization_name": "la-coop-des-communs",
-            "subscription_after": "2025-01-01T11:12:12"
+            "subscription_after": "2026-01-01T00:00:00"
         },
         "ovh": {
             "mailing_list": {
@@ -41,19 +41,36 @@
                 },
                 "Structure(s)": {
                     "linked_table": "Structures",
-                    "match_field": "Nom",
+                    "match_field": "Name",
                     "on_missing": "create"
                 }
             },
             "computed_fields": {
                 "new_member": {
-                    "field": "Nouvel Adherent",
+                    "field": "Nouvel adhérent",
                     "create_value": "Oui",
                     "update_value": "Non"
                 },
                 "first_year_subscription": {
                     "field": "Année de première adhésion",
                     "fallback_value": ""
+                }
+            },
+            "normalized_fields": {
+                "Genre": {
+                    "values": {
+                        "H": "Masculin",
+                        "M": "Masculin",
+                        "homme": "Masculin",
+                        "Masculin": "Masculin",
+                        "F": "Féminin",
+                        "femme": "Féminin",
+                        "Féminin": "Féminin",
+                        "Autre": "Autre",
+                        "Non-précisé": "Non-précisé"
+                    },
+                    "on_unknown": "fallback",
+                    "fallback_value": "Non-précisé"
                 }
             }
         }

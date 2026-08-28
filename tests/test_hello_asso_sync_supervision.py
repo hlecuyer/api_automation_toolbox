@@ -252,3 +252,79 @@ def test_rien_sur_stdout(mock_heartbeat, sync, capsys):
         sync.run()
 
     assert capsys.readouterr().out == ""
+
+
+# --- 6. le mail de bienvenue : un échec d'envoi doit se voir ---------------
+#
+# Trouvé le 28/08/2026 en écrivant le parcours du bac à sable. `send_email` ne
+# lève pas quand elle échoue : elle rend False — SMTP non configuré, expéditeur
+# invalide, refus du garde-fou d'envoi. Le code ignorait ce retour et écrivait
+# « Confirmation email sent » dans tous les cas.
+#
+# C'est la même forme de silence que celle qui a laissé seize suppressions
+# quotidiennes passer pendant des mois : l'échec et le succès écrivaient la même
+# ligne. Un adhérent sans mail de bienvenue ne se plaint pas, il ne sait pas
+# qu'il aurait dû en recevoir un.
+
+
+@pytest.fixture
+def sync_avec_mail(sync):
+    sync.conf["ovh"]["email"] = {
+        "from": "expediteur@x.fr",
+        "subject": "Bienvenue",
+        "send_confirmation": True,
+    }
+    sync.ovh_email_client = Mock()
+    return sync
+
+
+@patch("src.hello_asso_sync.heartbeat")
+@patch("src.hello_asso_sync.syslog")
+def test_mail_envoye_aucune_erreur(mock_syslog, mock_heartbeat, sync_avec_mail):
+    sync_avec_mail.ovh_email_client.send_email.return_value = True
+    sync_avec_mail.hello_asso_client.parse_items_to_subscriptions.return_value = [
+        adhesion("a@x.fr")
+    ]
+
+    with patch.object(sync_avec_mail, "update_date_conf"):
+        sync_avec_mail.run()
+
+    assert "erreurs=0" in ligne_de_fin(mock_syslog)
+
+
+@patch("src.hello_asso_sync.heartbeat")
+@patch("src.hello_asso_sync.syslog")
+def test_mail_refuse_compte_une_erreur(mock_syslog, mock_heartbeat, sync_avec_mail):
+    """L'adhésion est enregistrée, le mail n'est pas parti : les deux doivent
+    se lire dans la ligne de vie."""
+    sync_avec_mail.ovh_email_client.send_email.return_value = False
+    sync_avec_mail.hello_asso_client.parse_items_to_subscriptions.return_value = [
+        adhesion("a@x.fr")
+    ]
+
+    with patch.object(sync_avec_mail, "update_date_conf"):
+        sync_avec_mail.run()
+
+    ligne = ligne_de_fin(mock_syslog)
+    assert "traitées=1" in ligne
+    assert "erreurs=1" in ligne
+    # Le passage a bien eu lieu : le voyant reste vert, le compteur porte le reste.
+    assert "statut=ok" in ligne
+
+
+@patch("src.hello_asso_sync.heartbeat")
+@patch("src.hello_asso_sync.syslog")
+def test_mail_refuse_ne_dit_pas_qu_il_est_parti(
+    mock_syslog, mock_heartbeat, sync_avec_mail
+):
+    sync_avec_mail.ovh_email_client.send_email.return_value = False
+    sync_avec_mail.hello_asso_client.parse_items_to_subscriptions.return_value = [
+        adhesion("a@x.fr")
+    ]
+
+    with patch.object(sync_avec_mail, "update_date_conf"):
+        sync_avec_mail.run()
+
+    messages = [appel[0][-1] for appel in mock_syslog.syslog.call_args_list]
+    assert not any("Confirmation email sent" in m for m in messages)
+    assert any("NOT sent" in m for m in messages)
