@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pose la structure de la table Partenaires dans Airtable.
 
-Traduit la proposition de Gaëlle F. du 26/08/2026 (neuf colonnes) en champs
-Airtable. Trois écarts assumés par rapport à la lettre de la spec, expliqués
-dans `planification/2026-08-27-table-partenaires-pour-vera.md` :
+Traduit la proposition du 26/08/2026 (neuf colonnes) en champs Airtable.
+Trois écarts assumés par rapport à la lettre de la spec, expliqués dans la
+note de spec des champs partenaires (dossier `planification/`, hors dépôt) :
 
 - colonne 6 : un champ lié n'a pas de limite de contacts, la question « trois
   maximum puis débordement dans les commentaires » ne se pose pas ;
