@@ -36,7 +36,7 @@ from src.lien_formulaire import CHAMP_LIEN, CHAMP_LIEN_ENVOYE
 from src.reconciliation import CHAMP_DATE_MAJ
 from src.relance_fiche import (CHAMP_ADRESSE, CHAMP_DERNIERE_RELANCE, PALIERS,
                                Relance, a_relancer)
-from src.templates import relance_email
+from src.templates import relance_email, welcome_email
 
 CHEMIN_CONF = "config/hello-asso-automation-conf.json"
 
@@ -56,7 +56,27 @@ def _conf(chemin):
         return json.load(f)
 
 
+def _logo_inline():
+    """Le logo embarqué du bloc signature, même mécanisme que le mail de bienvenue.
+
+    Sans lui, le `cid:logo` du gabarit montre une image cassée. Logo manquant :
+    le mail part quand même, le syslog porte l'avertissement — même règle que
+    `hello_asso_sync`, la signature ne doit pas faire échouer la relance.
+    """
+    try:
+        with open(welcome_email.LOGO_PATH, "rb") as f:
+            return [("logo", f.read(), "png")]
+    except OSError as e:
+        syslog.syslog(
+            syslog.LOG_WARNING,
+            "relance_fiche: logo absent ({}) — mails sans logo embarqué".format(e),
+        )
+        return None
+
+
 def _envoyeur(client, expediteur, dry_run_envoi):
+    logo_inline = _logo_inline()
+
     def envoyer(destinataire, prenom, lien, palier):
         texte, html = relance_email.render(lien, prenom)
         return client.send_email(
@@ -65,6 +85,7 @@ def _envoyeur(client, expediteur, dry_run_envoi):
             subject=relance_email.SUBJECT,
             body_html=html,
             body_text=texte,
+            inline_images=logo_inline,
             dry_run=dry_run_envoi,
         )
     return envoyer

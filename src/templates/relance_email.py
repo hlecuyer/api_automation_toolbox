@@ -63,13 +63,30 @@ BODY_HTML = """<html>
                         </td>
                     </tr>
                     <tr>
-                        <td style="padding: 24px 32px 32px 32px; color:#666; font-size: 14px;">
-                            <p style="margin:0;">Bien cordialement,<br>
-                            @@SIG_NAME@@<br>
-                            @@SIG_ROLE@@<br>
-                            @@SIG_PHONE@@<br>
-                            <a href="mailto:@@SIG_EMAIL@@" style="color:#3CB1D4;">@@SIG_EMAIL@@</a><br>
-                            <a href="https://coopdescommuns.org" style="color:#3CB1D4;">coopdescommuns.org</a></p>
+                        <td style="padding: 28px 32px 8px 32px;">
+                            <p style="margin: 0;">Bien cordialement,</p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td style="padding: 8px 32px 32px 32px;">
+                            <table cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td valign="top" style="padding-right: 12px;">
+                                        <img width="85" height="69" src="cid:logo" alt="La Coop des Communs" style="display:block;">
+                                    </td>
+                                    <td valign="top">
+                                        <p style="margin:0;">
+                                            <strong style="font-size:13px; color:#4B4B4D;">@@SIG_NAME@@</strong><br>
+                                            <span style="color:#3CB1D4; font-size:12px;">@@SIG_ROLE@@</span>
+                                        </p>
+                                        <p style="margin: 4px 0 0 0; font-size:12px;">@@SIG_PHONE@@<br>
+                                            <a href="mailto:@@SIG_EMAIL@@" style="color:#4B4B4D;">@@SIG_EMAIL@@</a><br>
+                                            <a href="https://coopdescommuns.org/" style="color:#4B4B4D;">coopdescommuns.org</a>
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
                         </td>
                     </tr>
                 </table>
