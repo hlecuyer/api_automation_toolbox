@@ -43,6 +43,12 @@
                     "linked_table": "Structures",
                     "match_field": "Name",
                     "on_missing": "create"
+                },
+                "Intérêts": {
+                    "linked_table": "Centres d'intérêt",
+                    "match_field": "Nom",
+                    "on_missing": "warn",
+                    "split": ","
                 }
             },
             "computed_fields": {

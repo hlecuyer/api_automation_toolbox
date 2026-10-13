@@ -448,3 +448,93 @@ class TestAirtableClientComputedFields:
         # _apply_computed_fields must be safe to call with empty config
         client._apply_computed_fields(fields, existing_record=None)
         assert fields == {"E-mail": "x@example.com"}
+
+
+class TestChampsLiesParDecoupe:
+    """Les tags des centres d'intérêt : une chaîne HelloAsso, plusieurs liens.
+
+    « Intérêts (mot-clés) » arrive comme une seule chaîne («Agriculture,
+    Tiers-lieux»). Le rattachement doit la découper et résoudre chaque
+    mot-clé, sans jamais mettre l'adhésion en péril pour un mot inconnu :
+    avec `on_missing: "warn"`, un mot non reconnu coûte son mot, pas le champ,
+    et surtout pas l'écriture entière.
+    """
+
+    @pytest.fixture
+    def client_tags(self):
+        return AirtableClient(
+            api_key="k",
+            base_id="b",
+            table_name="Annuaire",
+            linked_records={
+                "Intérêts": {
+                    "linked_table": "Centres d'intérêt",
+                    "match_field": "Nom",
+                    "on_missing": "warn",
+                    "split": ",",
+                },
+            },
+        )
+
+    def test_la_chaine_est_coupee_et_chaque_mot_est_resolu(self, client_tags):
+        """«Agriculture, Alimentation» devient deux liens, un par mot-clé."""
+        client_tags.resolve_linked_record = Mock(side_effect=["recA", "recB"])
+        fields = {"Intérêts": "Agriculture, Alimentation"}
+        client_tags._apply_linked_records(fields, existing_record=None)
+        assert fields["Intérêts"] == ["recA", "recB"]
+        assert [c.kwargs["value"] for c in client_tags.resolve_linked_record.call_args_list] \
+            == ["Agriculture", "Alimentation"]
+
+    def test_les_espaces_autour_des_mots_sont_retires(self, client_tags):
+        """La découpe ne doit pas résoudre « Alimentation » avec son espace final."""
+        client_tags.resolve_linked_record = Mock(return_value="recB")
+        fields = {"Intérêts": "Agriculture ,  Alimentation "}
+        client_tags._apply_linked_records(fields, existing_record=None)
+        assert [c.kwargs["value"] for c in client_tags.resolve_linked_record.call_args_list] \
+            == ["Agriculture", "Alimentation"]
+
+    def test_un_mot_inconnu_coute_son_mot_pas_le_champ(self, client_tags):
+        """Un mot-clé hors référentiel saute, les autres rattachent quand même."""
+        client_tags.resolve_linked_record = Mock(side_effect=["recA", None])
+        fields = {"Intérêts": "Agriculture, mot inconnu"}
+        client_tags._apply_linked_records(fields, existing_record=None)
+        assert fields["Intérêts"] == ["recA"]
+
+    def test_aucun_mot_resolu_le_champ_saute_et_le_reste_passe(self, client_tags):
+        """Sans rien de résolvable, le champ est retiré du payload : la fiche
+        arrive sans Intérêts plutôt que de faire échouer l'écriture entière."""
+        client_tags.resolve_linked_record = Mock(return_value=None)
+        fields = {"E-mail": "x@example.org", "Intérêts": "inconnu un, inconnu deux"}
+        client_tags._apply_linked_records(fields, existing_record=None)
+        assert "Intérêts" not in fields
+        assert fields["E-mail"] == "x@example.org"
+
+    def test_la_mise_a_jour_fusionne_avec_les_tags_deja_lies(self, client_tags):
+        """Une réadhésion ajoute ses tags à ceux déjà posés, sans doublon."""
+        client_tags.resolve_linked_record = Mock(return_value="recA")
+        fields = {"Intérêts": "Agriculture"}
+        existing = {"id": "rec1", "fields": {"Intérêts": ["recA", "recOld"]}}
+        client_tags._apply_linked_records(fields, existing_record=existing)
+        assert fields["Intérêts"] == ["recA", "recOld"]
+
+    def test_sans_split_une_chaine_restera_un_seul_mot(self):
+        """Sans `split` (Groupe(s), Structure(s)), le comportement est inchangé :
+        la valeur entière part en une seule résolution."""
+        client = AirtableClient(
+            api_key="k",
+            base_id="b",
+            table_name="Annuaire",
+            linked_records={
+                "Structure(s)": {
+                    "linked_table": "Structures",
+                    "match_field": "Name",
+                    "on_missing": "create",
+                },
+            },
+        )
+        client.resolve_linked_record = Mock(return_value="recS")
+        fields = {"Structure(s)": "Une structure, avec virgule"}
+        client._apply_linked_records(fields, existing_record=None)
+        assert fields["Structure(s)"] == ["recS"]
+        assert client.resolve_linked_record.call_args.kwargs["value"] \
+            == "Une structure, avec virgule"

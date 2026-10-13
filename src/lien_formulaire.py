@@ -55,7 +55,13 @@ PREFIXE_IDENTIFIANT = "rec"
 # l'enregistrement, pas par son identifiant. L'`Annuaire`, lui, ne stocke que des
 # identifiants. D'où cette résolution : sans elle, la question sur la structure
 # arrive vide, et c'est justement celle qui porte tout le chantier.
-COLONNES_LIEES = {"Structure(s)": ("Structures", "Name")}
+COLONNES_LIEES = {
+    "Structure(s)": ("Structures", "Name"),
+    # Les tags se préremplissent par leurs libellés, séparés par une virgule :
+    # c'est aussi la forme que la synchronisation reçoit de HelloAsso et
+    # découpe (`split` dans la configuration `linked_records`).
+    "Intérêts": ("Centres d'intérêt", "Nom"),
+}
 
 
 def _identifiants(valeurs):

@@ -370,10 +370,17 @@ class AirtableClient:
         """
         Resolve configured linked-record fields in `fields` from string → [record IDs].
 
+        A configured `split` separator cuts a free-text value into several
+        values before resolution: `Intérêts (mot-clés)` arrives as one string
+        («Agriculture, Tiers-lieux») and must become as many links. Values
+        that resolve to nothing are dropped individually — with
+        `on_missing: "warn"` an unknown keyword costs its keyword, not the
+        field, and certainly not the adhesion.
+
         On UPDATE (existing_record provided), merges with the record's existing IDs so
         we never overwrite groups/structures already attached to the user.
 
-        If a value cannot be resolved (and on_missing != "create"), the field is removed
+        If no value can be resolved (and on_missing != "create"), the field is removed
         from `fields` so the rest of the payload still goes through.
 
         Mutates `fields` in place.
@@ -388,25 +395,36 @@ class AirtableClient:
                 del fields[field_name]
                 continue
 
-            new_id = self.resolve_linked_record(
-                linked_table=conf["linked_table"],
-                match_field=conf.get("match_field", "Nom"),
-                value=value,
-                create_if_missing=conf.get("on_missing") == "create",
-            )
+            separateur = conf.get("split")
+            if isinstance(value, list):
+                valeurs = [v for v in value if isinstance(v, str) and v.strip()]
+            elif separateur:
+                valeurs = [v.strip() for v in value.split(separateur) if v.strip()]
+            else:
+                valeurs = [value]
 
-            if new_id is None:
-                # Resolution failed and not creating → drop the field, keep the rest
+            ids = []
+            for valeur in valeurs:
+                new_id = self.resolve_linked_record(
+                    linked_table=conf["linked_table"],
+                    match_field=conf.get("match_field", "Nom"),
+                    value=valeur,
+                    create_if_missing=conf.get("on_missing") == "create",
+                )
+                if new_id:
+                    ids.append(new_id)
+
+            if not ids:
+                # Nothing resolved and not creating → drop the field, keep the rest
                 del fields[field_name]
                 continue
 
-            ids = [new_id]
             if existing_record:
                 existing_ids = existing_record.get("fields", {}).get(field_name, [])
                 if isinstance(existing_ids, list):
                     # Preserve existing links, append new one if not already there.
                     # dict.fromkeys preserves insertion order while deduplicating.
-                    ids = list(dict.fromkeys(existing_ids + [new_id]))
+                    ids = list(dict.fromkeys(existing_ids + ids))
 
             fields[field_name] = ids
 

@@ -84,6 +84,16 @@ _spec = importlib.util.spec_from_file_location("bac_a_sable", _CHEMIN_BAC)
 bac = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bac)
 
+# Le référentiel des centres d'intérêt vit dans le script qui le pose dans la
+# base : une seule liste, celle de Benjamin, partagée par la pose du schéma et
+# par le parcours. Un parcours qui rejouerait des tags hors référentiel
+# n'éprouverait pas le rattachement, il l'éprouverait en le contournant.
+_CHEMIN_TAGS = Path(__file__).resolve().parent / "creer_table_centres_interet.py"
+_spec_tags = importlib.util.spec_from_file_location(
+    "creer_table_centres_interet", _CHEMIN_TAGS)
+tags_referentiel = importlib.util.module_from_spec(_spec_tags)
+_spec_tags.loader.exec_module(tags_referentiel)
+
 
 # Adresse du parcours. Horodatée, donc une exécution ne marche jamais sur les
 # traces de la précédente : deux parcours simultanés, ou un ménage qui a échoué,
@@ -109,7 +119,10 @@ NOM = "Répétition"
 REPONSES = {
     "Structure": bac.STRUCTURES[0],
     "Fonction au sein de votre structure": "Fonction de répétition",
-    "Intérêts (mot-clés)": "communs, répétition, bac à sable",
+    # Deux tags réels du référentiel, à la forme que HelloAsso livre : une
+    # seule chaîne, virgule séparatrice. C'est la découpe que la configuration
+    # `linked_records` doit opérer avant rattachement.
+    "Intérêts (mot-clés)": ", ".join(tags_referentiel.TAGS[:2]),
     "Localisation (code postal)": "75000",
     "Je souhaite que mon Nom et Prénom soient partagés sur le site web de "
     "l'association dans la liste des adhérent·es": "Oui",
@@ -706,6 +719,10 @@ TABLE_REPONSES = "Mise à jour fiche"
 CORRECTIONS = {
     "Quelle est votre fonction dans cette structure ?": "Fonction corrigée par l'adhérent",
     "Quel est votre genre ?": "Féminin",
+    # Déposé en libellés, résolu en identifiants au moment du dépôt : une liste
+    # de chaînes ne s'écrit pas dans un champ lié, et la résolution a besoin du
+    # client (`etape_mise_a_jour`).
+    tags_referentiel.QUESTION_INTERETS: list(tags_referentiel.TAGS[2:4]),
 }
 
 
@@ -780,6 +797,30 @@ def _reponse_par_formulaire(reponses, cibles, fiche, formulaire):
     return depose
 
 
+def _tags_en_identifiants(reponses, reponse):
+    """Les tags déposés en libellés deviennent des identifiants de fiche.
+
+    Un champ lié n'accepte que des `recXXX` : la résolution passe par le client,
+    qui connaît la table du référentiel. Un libellé absent du référentiel arrête
+    l'étape au lieu d'affaiblir la preuve en silence — le parcours vient de
+    démontrer un rattachement qui n'aurait pas eu lieu.
+    """
+    question = tags_referentiel.QUESTION_INTERETS
+    tags = reponse.get(question)
+    if not isinstance(tags, list):
+        return reponse
+    resolus = [reponses.resolve_linked_record(
+        tags_referentiel.TABLE_CIBLE, "Nom", tag) for tag in tags]
+    manquants = [tag for tag, identifiant in zip(tags, resolus) if not identifiant]
+    if manquants:
+        print("   ❌ tags absents du référentiel « %s » : %s"
+              % (tags_referentiel.TABLE_CIBLE, ", ".join(manquants)))
+        print("      Les (re)poser : scripts/creer_table_centres_interet.py --appliquer")
+        return None
+    reponse[question] = resolus
+    return reponse
+
+
 def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):
     """L'adhérent corrige sa fiche, et la réconciliation la recopie.
 
@@ -812,7 +853,11 @@ def etape_mise_a_jour(sync, credentials, cibles, fiche, conf, formulaire=None):
         print("   ✅ réponse reçue du formulaire — %s, désignant la fiche %s"
               % (depose["id"], fiche["id"]))
     else:
-        depose = reponses.create_record(dict(CORRECTIONS, **{CHAMP_FICHE: fiche["id"]}))
+        reponse = _tags_en_identifiants(
+            reponses, dict(CORRECTIONS, **{CHAMP_FICHE: fiche["id"]}))
+        if reponse is None:
+            return 1, None
+        depose = reponses.create_record(reponse)
         if not depose:
             print("   ❌ impossible de déposer une réponse dans « %s »" % TABLE_REPONSES)
             print("      La table existe-t-elle ? scripts/creer_table_mise_a_jour.py")

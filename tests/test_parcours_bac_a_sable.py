@@ -808,6 +808,16 @@ class TestComplet:
 # La mise à jour de fiche — la seconde moitié du parcours cible
 # --------------------------------------------------------------------------
 
+def identifiant_tag(tag):
+    """Le `recXXX` que FauxTableReponses rend pour un tag du référentiel.
+
+    La fausse table et la fiche relue doivent passer par LE MÊME rapprochement,
+    sinon le test validerait sa propre idée de la résolution plutôt que celle
+    du code.
+    """
+    return "recTAG%d" % parcours.tags_referentiel.TAGS.index(tag)
+
+
 class FauxTableReponses(FauxClientAirtable):
     """La table « Mise à jour fiche », sans réseau."""
 
@@ -827,6 +837,10 @@ class FauxTableReponses(FauxClientAirtable):
 
     def list_records(self, filter_by_formula=None, **_):
         return [{"id": "recREP", "fields": {parcours.CHAMP_SYNCHRONISE: self.synchronise}}]
+
+    def resolve_linked_record(self, linked_table, match_field, value,
+                              create_if_missing=False):
+        return identifiant_tag(value) if value in parcours.tags_referentiel.TAGS else None
 
 
 def monter_mise_a_jour(monkeypatch, table, fiche_relue):
@@ -856,8 +870,12 @@ class TestMiseAJour:
         rapprochement plutôt que celle du module.
         """
         base = {"E-mail": "x@example.org", parcours.CHAMP_DATE_MAJ: "2026-08-28"}
-        base.update({parcours.CORRESPONDANCE[libelle]: valeur
-                     for libelle, valeur in parcours.CORRECTIONS.items()})
+        for libelle, valeur in parcours.CORRECTIONS.items():
+            colonne = parcours.CORRESPONDANCE[libelle]
+            # Les tags voyagent en identifiants des deux côtés : déposés
+            # résolus dans la table de réponses, relus tels quels dans la fiche.
+            base[colonne] = [identifiant_tag(v) for v in valeur] \
+                if isinstance(valeur, list) else valeur
         base.update(champs)
         return {"id": "recFICHE", "fields": base}
 
