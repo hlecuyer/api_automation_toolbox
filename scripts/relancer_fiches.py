@@ -24,10 +24,12 @@ import json
 import os
 import sys
 import syslog
+import traceback
 from datetime import date
 
 from dotenv import load_dotenv
 
+from src import heartbeat
 from src.clients.airtable_client import AirtableClient
 from src.clients.ovh_email_client import OVHEmailClient
 from src.lien_formulaire import CHAMP_LIEN, CHAMP_LIEN_ENVOYE
@@ -43,6 +45,10 @@ CHEMIN_CONF = "config/hello-asso-automation-conf.json"
 # une centaine d'adhésions par an, donc un passage qui la touche est un passage
 # qui a un problème.
 LIMITE_PAR_DEFAUT = 25
+
+# La sentinelle du cron de relance. L'URL vit dans le `.env` de production,
+# posée par Ansible depuis le vault ; sans elle, le ping est inerte.
+HEARTBEAT_URL = "HEARTBEAT_URL_RELANCE"
 
 
 def _conf(chemin):
@@ -81,6 +87,28 @@ def main():
     p.add_argument("--config", default=CHEMIN_CONF, help="chemin de la configuration")
     args = p.parse_args()
 
+    try:
+        code = passage(args)
+    except Exception as e:
+        # stderr reste non redirigé : le MAILTO du cron attrape l'échec et la
+        # sentinelle part sur /fail. Un crash ne doit pas ressembler à un
+        # passage sain.
+        syslog.syslog(syslog.LOG_ERR,
+                      "relance_fiche: échec du passage ({})".format(e))
+        print("ERROR: relance_fiche a échoué : {}".format(e), file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        heartbeat.signaler(HEARTBEAT_URL, succes=False)
+        return 1
+    if args.envoyer and not args.test:
+        # Le voyant dit « le passage a eu lieu », pas « tout est parfait » :
+        # les erreurs unitaires restent dans le compteur et le code de retour.
+        # Simulation et --test ne pingent pas : un passage de diagnostic ne
+        # doit pas rendre la sentinelle verte à la place du cron.
+        heartbeat.signaler(HEARTBEAT_URL, succes=True)
+    return code
+
+
+def passage(args):
     base = args.base or os.getenv("AIRTABLE_BASE_ID_BAC_A_SABLE")
     jeton = (os.getenv("AIRTABLE_API_KEY_BAC_A_SABLE") or os.getenv("AIRTABLE_API_KEY")
              or os.getenv("AIRTABLE_API_KEY_PROD"))
