@@ -47,6 +47,7 @@ from src import heartbeat
 from src.clients.airtable_client import AirtableClient
 from src.clients.ovh_email_client import OVHEmailClient
 from src.reconciliation import CHAMP_FICHE, CHAMP_SYNCHRONISE
+from src.templates import signature, welcome_email
 
 CHEMIN_CONF = "config/hello-asso-automation-conf.json"
 
@@ -57,6 +58,7 @@ TABLE_GROUPES = "Liste des groupes"
 
 CHAMP_DATE_CREATION = "Date de création"
 CHAMP_NOUVEAU = "Nouvel adhérent"
+CHAMP_ADRESSE = "E-mail"
 CHAMP_LIEN_ENVOYE = "Lien envoyé le"
 CHAMP_DATE_MAJ = "Fiche mise à jour le"
 CHAMP_DERNIERE_RELANCE = "Dernière relance le"
@@ -72,6 +74,19 @@ LIGNES_DE_VIE = {
 }
 
 LIMITE_RELANCES = 25  # même limite que relancer_fiches : la toucher est un signal
+
+
+def logo_inline():
+    """Le logo embarqué de la signature, même mécanique que les autres mails."""
+    try:
+        with open(welcome_email.LOGO_PATH, "rb") as f:
+            return [("logo", f.read(), "png")]
+    except OSError as e:
+        syslog.syslog(
+            syslog.LOG_WARNING,
+            "rapport: logo absent ({}) — mail sans logo embarqué".format(e),
+        )
+        return None
 
 
 def _conf(chemin):
@@ -125,9 +140,16 @@ def compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui):
     a_relancer = [f for f in fiches if a_relancer_fiche(f["fields"], aujourdhui)]
 
     # La répartition nouveaux/réadhésions suit le champ calculé par la synchro
-    # (« Oui » à la création d'un nouveau, « Non » sur une réadhésion).
+    # (« Oui » à la création d'un nouveau, « Non » sur une réadhésion). Les
+    # adresses sont listées dans le rapport : c'est un mail interne, et une
+    # liste d'adresses se lit mieux qu'un compte quand il faut agir.
     repartition = Counter(f["fields"].get(CHAMP_NOUVEAU) or "non renseigné"
                           for f in creation)
+    adhesions_details = [
+        {"email": f["fields"].get(CHAMP_ADRESSE, "?"),
+         "nouveau": f["fields"].get(CHAMP_NOUVEAU) or "non renseigné"}
+        for f in creation
+    ]
 
     toutes_reponses = reponses.list_records()
     orphelines = [r for r in toutes_reponses
@@ -141,6 +163,7 @@ def compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui):
         "dans_groupe": len(dans_groupe),
         "adhesions": len(creation),
         "repartition_adhesions": dict(repartition),
+        "adhesions_details": adhesions_details,
         "liens_envoyes": len(liens),
         "fiches_maj": len(maj),
         "relances": len(relances),
@@ -232,6 +255,15 @@ def rendre_rapport(comptes, passages, syslog_lisible, debut, fin, aujourdhui):
         "   répartition : %s" % (", ".join(
             "%s %d" % (k, v) for k, v in sorted(comptes["repartition_adhesions"].items()))
             or "aucune"),
+    ]
+    for categorie in ("Oui", "Non"):
+        adresses = [a["email"] for a in comptes["adhesions_details"]
+                    if a["nouveau"] == categorie]
+        if adresses:
+            lignes.append("   %s : %s" % (
+                "nouveaux adhérents" if categorie == "Oui" else "réadhésions",
+                ", ".join(adresses)))
+    lignes += [
         "Liens de bienvenue envoyés : %d" % comptes["liens_envoyes"],
         "Fiches mises à jour : %d" % comptes["fiches_maj"],
         "Relances envoyées : %d" % comptes["relances"],
@@ -265,6 +297,187 @@ def rendre_rapport(comptes, passages, syslog_lisible, debut, fin, aujourdhui):
     return "\n".join(lignes) + "\n"
 
 
+COULEUR = "#3CB1D4"      # le bleu des mails de la Coop
+COULEUR_TEXTE = "#4B4B4D"
+COULEUR_ANOMALIE = "#B45309"   # orange sobre : lu, sans crier
+FOND_ANOMALIE = "#FEF3C7"
+FOND_OK = "#ECFDF5"
+VERT = "#047857"
+
+BLOC_SIGNATURE = """                    <tr>
+                        <td style="padding: 28px 32px 8px 32px;">
+                            <p style="margin: 0;">Bien cordialement,</p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td style="padding: 8px 32px 32px 32px;">
+                            <table cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td valign="top" style="padding-right: 12px;">
+                                        <img width="85" height="69" src="cid:logo" alt="La Coop des Communs" style="display:block;">
+                                    </td>
+                                    <td valign="top">
+                                        <p style="margin:0;">
+                                            <strong style="font-size:13px; color:#4B4B4D;">@@SIG_NAME@@</strong><br>
+                                            <span style="color:#3CB1D4; font-size:12px;">@@SIG_ROLE@@</span>
+                                        </p>
+                                        <p style="margin: 4px 0 0 0; font-size:12px;">@@SIG_PHONE@@<br>
+                                            <a href="mailto:@@SIG_EMAIL@@" style="color:#4B4B4D;">@@SIG_EMAIL@@</a><br>
+                                            <a href="https://coopdescommuns.org/" style="color:#4B4B4D;">coopdescommuns.org</a>
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
+
+
+def _ligne_metric(label, valeur, couleur=COULEUR_TEXTE):
+    """Une ligne chiffre du rapport, en table HTML compatible clients mail."""
+    return ('<tr>'
+            '<td style="padding: 6px 0; color:#666; font-size:14px;">%s</td>'
+            '<td align="right" style="padding: 6px 0; font-size:14px; '
+            'font-weight:bold; color:%s;">%s</td>'
+            '</tr>' % (label, couleur, valeur))
+
+
+def _liste_adresses(adresses):
+    if not adresses:
+        return ""
+    return ("<p style='margin:2px 0 8px 0; font-size:13px; color:#666;'>%s</p>"
+            % ", ".join(adresses))
+
+
+def rendre_rapport_html(comptes, passages, syslog_lisible, debut, fin, aujourdhui):
+    """Le même rapport en HTML, aux couleurs des mails de la Coop.
+
+    Même contenu que la version texte, même ordre : un seul fait, deux
+    habillages. La signature est le bloc exact des autres mails.
+    """
+    anomalies_html = []
+    if comptes["adhesions"] != comptes["liens_envoyes"]:
+        anomalies_html.append(
+            "%d adhésion(s) traitée(s) mais %d lien(s) de bienvenue envoyé(s) : "
+            "un mail de bienvenue n\'est pas parti."
+            % (comptes["adhesions"], comptes["liens_envoyes"]))
+    if comptes["orphelines"]:
+        anomalies_html.append("%d réponse(s) au formulaire sans fiche derrière."
+                              % comptes["orphelines"])
+    if comptes["reponses_en_attente"]:
+        anomalies_html.append("%d réponse(s) pas encore recopiée(s) dans les fiches."
+                              % comptes["reponses_en_attente"])
+    if comptes["a_relancer"] > LIMITE_RELANCES:
+        anomalies_html.append(
+            "%d fiches à relancer : au-delà de la limite d\'un passage (%d)."
+            % (comptes["a_relancer"], LIMITE_RELANCES))
+
+    if anomalies_html:
+        fond, bord, titre = FOND_ANOMALIE, COULEUR_ANOMALIE, "À regarder"
+        corps_anomalies = "".join(
+            '<p style="margin:0 0 6px 0; color:%s; font-size:13px;">⚠ %s</p>'
+            % (bord, texte) for texte in anomalies_html)
+    else:
+        fond, bord, titre = FOND_OK, VERT, "Aucune anomalie détectée"
+        corps_anomalies = (
+            '<p style="margin:0; color:' + VERT + '; font-size:13px;">'
+            "Rien d\'anormal sur la fenêtre.</p>")
+
+    bloc_anomalies = (
+        '<tr><td style="padding: 20px 32px 0 32px;">'
+        '<table width="100%%" cellspacing="0" cellpadding="0" border="0" '
+        'style="background-color:' + fond + '; border-left:4px solid ' + bord
+        + '; border-radius:4px;">'
+        '<tr><td style="padding: 14px 18px;">'
+        '<p style="margin:0 0 6px 0; font-size:12px; font-weight:bold; '
+        'letter-spacing:1px; color:' + bord + '; text-transform:uppercase;">'
+        + titre + "</p>" + corps_anomalies
+        + "</td></tr></table></td></tr>")
+
+    nouveaux = [a["email"] for a in comptes["adhesions_details"]
+                if a["nouveau"] == "Oui"]
+    readhesions = [a["email"] for a in comptes["adhesions_details"]
+                   if a["nouveau"] == "Non"]
+    detail_adhesions = ""
+    if nouveaux:
+        detail_adhesions += _ligne_detail("Nouveaux adhérents", nouveaux)
+    if readhesions:
+        detail_adhesions += _ligne_detail("Réadhésions", readhesions)
+
+    metriques = ""
+    for label, valeur in (
+            ("Adhésions traitées", str(comptes["adhesions"])),
+            ("Liens de bienvenue envoyés", str(comptes["liens_envoyes"])),
+            ("Fiches mises à jour", str(comptes["fiches_maj"])),
+            ("Relances envoyées", str(comptes["relances"])),
+            ("En attente : fiches à relancer", str(comptes["a_relancer"])),
+            ("En attente : réponses à recopier", str(comptes["reponses_en_attente"])),
+            ("Désinscrites de la liste membres (cumul)", str(comptes["desinscrites"]))):
+        metriques += _ligne_metric(label, valeur)
+    detail_adhesions = detail_adhesions.replace("%%", "%")
+
+    if syslog_lisible:
+        lignes_sante = []
+        for nom, entree in passages.items():
+            if nom == "mailinglist":
+                lignes_sante.append("mailinglist : " + (
+                    "échec le %s" % entree["derniere"] if entree["derniere"]
+                    else "aucune erreur journalisée (ce composant ne journalise "
+                         "que ses échecs)"))
+            elif entree["derniere"]:
+                lignes_sante.append(
+                    "%s : dernier passage le %s, %d erreur(s) sur la fenêtre"
+                    % (nom, entree["derniere"], entree["erreurs"]))
+            else:
+                lignes_sante.append("%s : AUCUN passage sur la fenêtre ⚠" % nom)
+        corps_sante = "".join(
+            '<p style="margin:0 0 4px 0; font-size:13px; color:#666;">%s</p>' % l
+            for l in lignes_sante)
+    else:
+        corps_sante = (
+            '<p style="margin:0; font-size:13px; color:#666;">'
+            "syslog non lisible depuis cet utilisateur : section santé absente "
+            "de ce rapport.</p>")
+
+    html = (
+        '<html>\n<head><meta charset="UTF-8"></head>\n'
+        '<body style="margin:0; padding:0; background-color:#f5f7f9; '
+        'font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333;">\n'
+        '<table width="100%%" cellspacing="0" cellpadding="0" border="0" '
+        'style="background-color:#f5f7f9; padding: 24px 0;"><tr><td align="center">\n'
+        '<table width="600" cellspacing="0" cellpadding="0" border="0" '
+        'style="background-color:#ffffff; border-radius: 8px; max-width: 600px; '
+        'width: 100%%;">\n'
+        '<tr><td style="padding: 32px 32px 0 32px;">'
+        '<h1 style="margin:0; font-size:20px; color:' + COULEUR + ';">'
+        "Rapport Coop des Communs</h1>"
+        '<p style="margin:4px 0 0 0; color:#666; font-size:13px;">semaine du '
+        + debut.strftime("%d/%m") + " au " + fin.strftime("%d/%m") + "</p>"
+        '</td></tr>\n'
+        + bloc_anomalies + "\n"
+        + '<tr><td style="padding: 20px 32px 0 32px;">'
+        '<table width="100%%" cellspacing="0" cellpadding="0" border="0" '
+        'style="border-top:2px solid #eef2f5;">'
+        '<tr><td style="padding: 12px 0 2px 0;"></td></tr>'
+        + metriques + "</table>"
+        + detail_adhesions + "</td></tr>\n"
+        + '<tr><td style="padding: 20px 32px 0 32px;">'
+        '<p style="margin:0 0 8px 0; font-size:12px; font-weight:bold; '
+        'letter-spacing:1px; color:#99A3AB; text-transform:uppercase;">'
+        "Santé des passages</p>" + corps_sante + "</td></tr>\n"
+        + BLOC_SIGNATURE + "\n"
+        + "</table></td></tr></table>\n</body>\n</html>"
+    )
+    return signature.appliquer(html)
+
+
+def _ligne_detail(titre, adresses):
+    """La liste des adresses d\'une catégorie d\'adhésions, sous le tableau."""
+    return (
+        '<p style="margin:6px 0 2px 0; font-size:13px; color:' + COULEUR_TEXTE
+        + '; font-weight:bold;">' + titre + " :</p>"
+        + "<p style='margin:0 0 8px 0; font-size:13px; color:#666;'>"
+        + ", ".join(adresses) + "</p>")
 def a_relancer_fiche(champs, aujourdhui):
     """Le test de relance, réécrit en local pour ne pas dépendre du lien.
 
@@ -325,10 +538,14 @@ def passage(args):
     conf_globale = _conf(args.config)
     conf = conf_globale["conf"]
     credentials = conf_globale.get("credentials", {})
-    email = conf.get("ovh", {}).get("email", {})
-    expediteur = (args.expediteur or email.get("from") or os.getenv("SMTP_USER"))
+    # Le rapport est un mail interne : il part de l'identité du relais
+    # (SMTP_USER, `support@dsi.coop` en production), pas de l'expéditeur
+    # institutionnel des mails aux adhérents (conf.ovh.email.from, la boîte
+    # de la présidente). Rien d'un rapport de supervision ne doit ressembler
+    # à un courrier de la Coop.
+    expediteur = args.expediteur or os.getenv("SMTP_USER")
     if not expediteur:
-        sys.exit("Aucun expéditeur : --expediteur, conf.ovh.email.from, ou SMTP_USER.")
+        sys.exit("Aucun expéditeur : --expediteur ou SMTP_USER.")
     destinataire = (args.destinataire or os.getenv("RAPPORT_DESTINATAIRE")
                     or os.getenv("SMTP_USER"))
     if args.envoyer and not destinataire:
@@ -351,6 +568,8 @@ def passage(args):
     comptes = compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui)
     syslog_lisible, passages = lire_passages_syslog(debut, fin)
     rapport = rendre_rapport(comptes, passages, syslog_lisible, debut, fin, aujourdhui)
+    rapport_html = rendre_rapport_html(comptes, passages, syslog_lisible,
+                                       debut, fin, aujourdhui)
 
     print(rapport)
     if not args.envoyer:
@@ -371,6 +590,8 @@ def passage(args):
         to=[destinataire],
         subject=objet,
         body_text=rapport,
+        body_html=rapport_html,
+        inline_images=logo_inline(),
         dry_run=False,
     )
     if not parti:

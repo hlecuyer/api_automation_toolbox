@@ -103,6 +103,37 @@ def test_la_repartition_distingue_nouveau_et_readhesion():
     assert comptes["repartition_adhesions"] == {"Oui": 1, "Non": 1}
 
 
+def test_les_adresses_sont_listees_par_categorie():
+    annuaire = [
+        fiche("rec1", "2026-10-08", **{"Nouvel adhérent": "Oui",
+                                       "E-mail": "nouveau@example.org"}),
+        fiche("rec2", "2026-10-09", **{"Nouvel adhérent": "Non",
+                                       "E-mail": "retour@example.org"}),
+    ]
+    comptes = compter(annuaire)
+    assert comptes["adhesions_details"] == [
+        {"email": "nouveau@example.org", "nouveau": "Oui"},
+        {"email": "retour@example.org", "nouveau": "Non"},
+    ]
+    rapport = rendre_rapport(comptes, {}, False, DEBUT, FIN, AUJOURDHUI)
+    assert "nouveaux adhérents : nouveau@example.org" in rapport
+    assert "réadhésions : retour@example.org" in rapport
+
+
+def test_le_rendu_html_porte_les_listes_et_la_signature():
+    from scripts.rapport_hebdo import rendre_rapport_html
+    annuaire = [
+        fiche("rec1", "2026-10-08", **{"Nouvel adhérent": "Oui",
+                                       "E-mail": "nouveau@example.org"}),
+    ]
+    comptes = compter(annuaire)
+    html = rendre_rapport_html(comptes, {}, False, DEBUT, FIN, AUJOURDHUI)
+    assert "nouveau@example.org" in html
+    assert "Nouveaux adhérents" in html
+    assert '<img width="85" height="69" src="cid:logo"' in html
+    assert "@@SIG_" not in html
+
+
 def test_le_groupe_ne_compte_que_ses_membres():
     annuaire = [
         fiche("rec1", "2026-10-08", **{"Groupe(s)": ["recG"]}),
