@@ -160,6 +160,7 @@ class TestPerimetre:
         assert bac.TABLES_UTILES == [
             "Annuaire", "Liste des groupes", "Structures", "Liste Diffusion",
             "Ajout à un groupe", "Partenaires",
+            "Mise à jour fiche", "Centres d'intérêt",
         ]
 
 

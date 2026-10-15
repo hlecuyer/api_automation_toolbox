@@ -60,6 +60,8 @@ TABLES_UTILES = [
     "Liste Diffusion",
     "Ajout à un groupe",
     "Partenaires",
+    "Mise à jour fiche",
+    "Centres d'intérêt",
 ]
 
 # Domaines réservés par l'IANA (RFC 2606) : ils n'ont pas d'enregistrement MX et
