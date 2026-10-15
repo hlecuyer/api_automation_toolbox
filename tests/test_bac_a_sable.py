@@ -44,7 +44,7 @@ class FauxAirtable:
 def perimetre_reduit(monkeypatch):
     """Les cas synthétiques ne parlent que de l'Annuaire.
 
-    Sans ça, les cinq autres tables du périmètre réel manqueraient dans les deux
+    Sans ça, les sept autres tables du périmètre réel manqueraient dans les deux
     schémas et compteraient comme des écarts : tous les tests passeraient au
     vert pour la mauvaise raison.
     """
@@ -147,6 +147,34 @@ class TestDerive:
         ref = [table("Annuaire", []), table("Vote AG 2023", [])]
         code, sortie = comparer(ref, [table("Annuaire", [])], capsys)
         assert "Hors périmètre" in sortie and "Vote AG 2023" in sortie
+
+
+class TestEcartsDeclares:
+    def test_ecart_declare_nomme_sans_sortir_en_rouge(self, capsys, monkeypatch):
+        """Un écart assumé reste annoncé à chaque passage, mais ne sonne plus l'alarme."""
+        monkeypatch.setattr(bac, "ECARTS_CONNUS", {("Annuaire", "Vestige"): "raison assumée"})
+        ref = [table("Annuaire", [champ("E-mail", "email")])]
+        cible = [table("Annuaire", [champ("E-mail", "email"),
+                                    champ("Vestige", "singleLineText")])]
+        code, sortie = comparer(ref, cible, capsys)
+        assert code == 0
+        assert "déclaré" in sortie and "Vestige" in sortie and "raison assumée" in sortie
+
+    def test_ecart_nouveau_sur_la_meme_table_sort_toujours_en_rouge(self, capsys, monkeypatch):
+        monkeypatch.setattr(bac, "ECARTS_CONNUS", {("Annuaire", "Vestige"): "raison assumée"})
+        ref = [table("Annuaire", [champ("E-mail", "email"), champ("Prénom", "singleLineText")])]
+        cible = [table("Annuaire", [champ("E-mail", "email"), champ("Vestige", "singleLineText")])]
+        code, sortie = comparer(ref, cible, capsys)
+        assert code == 1
+        assert "manquant" in sortie and "Prénom" in sortie
+
+    def test_declaration_obsolete_est_signalee(self, capsys, monkeypatch):
+        """Une déclaration qui ne mord plus doit se retirer, sinon elle pourrit le filtre."""
+        monkeypatch.setattr(bac, "ECARTS_CONNUS", {("Annuaire", "Fantôme"): "raison oubliée"})
+        t = [table("Annuaire", [champ("E-mail", "email")])]
+        code, sortie = comparer(t, t, capsys)
+        assert code == 0
+        assert "à retirer" in sortie and "Fantôme" in sortie
 
 
 class TestPerimetre:

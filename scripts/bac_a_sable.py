@@ -64,6 +64,14 @@ TABLES_UTILES = [
     "Centres d'intérêt",
 ]
 
+# Écarts assumés entre la référence et le bac à sable, par (table, champ).
+# Nommés à chaque passage, ils ne font plus sortir `comparer` en rouge :
+# un écart tu n'est pas un écart connu, celui-ci l'est.
+ECARTS_CONNUS = {
+    ("Mise à jour fiche", "Avez-vous une autre adresse e-mail ?"):
+        "question retirée du formulaire le 28/08, champ laissé dans le bac à sable (Hugo, 15/10)",
+}
+
 # Domaines réservés par l'IANA (RFC 2606) : ils n'ont pas d'enregistrement MX et
 # ne peuvent structurellement pas recevoir de courrier. C'est ce qui fait de la
 # vérification d'adresses un contrôle et non une convention.
@@ -223,6 +231,8 @@ def comparer(at, reference, cible):
     ref = {t["name"]: t for t in at.schema(reference)}
     bac = {t["name"]: t for t in at.schema(cible)}
     ecarts = 0
+    declares = 0
+    declares_vus = set()
 
     print("référence  %s  (%d tables)" % (reference, len(ref)))
     print("bac à sable %s  (%d tables)" % (cible, len(bac)))
@@ -239,24 +249,24 @@ def comparer(at, reference, cible):
             continue
 
         cr, cb = _par_nom(ref[nom]), _par_nom(bac[nom])
-        lignes = []
+        trouves = []  # (champ, ligne) : le champ décide du sort de la ligne
 
         for champ in sorted(set(cr) - set(cb)):
             types = ", ".join(c["type"] for c in cr[champ])
             main = "  ⚠ à poser à la main" if any(
                 c["type"] in TYPES_NON_CREABLES for c in cr[champ]) else ""
-            lignes.append("   manquant  %-42s %s%s" % (champ, types, main))
+            trouves.append((champ, "   manquant  %-42s %s%s" % (champ, types, main)))
 
         for champ in sorted(set(cb) - set(cr)):
-            lignes.append("   en trop   %-42s %s" % (
-                champ, ", ".join(c["type"] for c in cb[champ])))
+            trouves.append((champ, "   en trop   %-42s %s" % (
+                champ, ", ".join(c["type"] for c in cb[champ]))))
 
         for champ in sorted(set(cr) & set(cb)):
             tr = sorted(c["type"] for c in cr[champ])
             tb = sorted(c["type"] for c in cb[champ])
             if tr != tb:
-                lignes.append("   type      %-42s référence=%s  bac=%s" % (
-                    champ, "/".join(tr), "/".join(tb)))
+                trouves.append((champ, "   type      %-42s référence=%s  bac=%s" % (
+                    champ, "/".join(tr), "/".join(tb))))
                 continue
             for a, b in zip(cr[champ], cb[champ]):
                 oa, ob = _options(a), _options(b)
@@ -269,15 +279,28 @@ def comparer(at, reference, cible):
                     detail.append("absentes du bac : " + ", ".join(manquantes))
                 if surnumeraires:
                     detail.append("en trop : " + ", ".join(surnumeraires))
-                lignes.append("   options   %-42s %s" % (champ, " | ".join(detail)))
+                trouves.append((champ, "   options   %-42s %s" % (champ, " | ".join(detail))))
 
-        if lignes:
-            print("❌ %s — %d écart(s)" % (nom, len(lignes)))
-            for ligne in lignes:
+        nouveaux = [(c, l) for c, l in trouves if (nom, c) not in ECARTS_CONNUS]
+        announces = [(c, l) for c, l in trouves if (nom, c) in ECARTS_CONNUS]
+
+        if nouveaux:
+            print("❌ %s — %d écart(s)" % (nom, len(nouveaux)))
+            for _, ligne in nouveaux:
                 print(ligne)
-            ecarts += len(lignes)
+        elif announces:
+            print("✅ %s — identique, hors écarts déclarés" % nom)
         else:
             print("✅ %s — %d champs, identiques" % (nom, len(ref[nom]["fields"])))
+        for champ, _ in announces:
+            print("   déclaré  %-42s %s" % (champ, ECARTS_CONNUS[(nom, champ)]))
+
+        ecarts += len(nouveaux)
+        declares += len(announces)
+        declares_vus.update((nom, c) for c, _ in announces)
+
+    for cle in sorted(set(ECARTS_CONNUS) - declares_vus):
+        print("⚠  écart déclaré sans effet, à retirer de ECARTS_CONNUS : %s / %s" % cle)
 
     hors = sorted(set(ref) - set(TABLES_UTILES))
     if hors:
@@ -286,8 +309,15 @@ def comparer(at, reference, cible):
         print("Ce ne sont pas des tables oubliées, ce sont des vestiges qu'aucun code ne touche.")
 
     print()
-    print("→ %d écart(s)" % ecarts if ecarts else "→ aucun écart sur le périmètre utile")
-    return 1 if ecarts else 0
+    if ecarts:
+        suite = " (+ %d déclaré(s))" % declares if declares else ""
+        print("→ %d nouvel(s) écart(s)%s" % (ecarts, suite))
+        return 1
+    if declares:
+        print("→ aucun écart à signaler (%d déclaré(s))" % declares)
+        return 0
+    print("→ aucun écart sur le périmètre utile")
+    return 0
 
 
 # --------------------------------------------------------------------------
