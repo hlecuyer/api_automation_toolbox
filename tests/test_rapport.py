@@ -8,7 +8,8 @@ bienvenue, réponses orphelines), et le rapport rendu lisible.
 
 from datetime import date
 
-from scripts.rapport_hebdo import (_jour, compter_volumetries, rendre_rapport)
+from scripts.rapport_hebdo import (_jour, compter_volumetries, lire_passages_syslog,
+                                   rendre_rapport)
 
 AUJOURDHUI = date(2026, 10, 13)
 DEBUT = date(2026, 10, 7)
@@ -39,29 +40,47 @@ def compter(annuaire, reponses=None, id_groupe=None):
 
 def test_la_fenetre_compte_par_date():
     comptes = compter([
-        fiche("rec1", "2026-10-08", **{"Lien envoyé le": "2026-10-08"}),
-        fiche("rec2", "2026-10-01"),  # avant la fenêtre
-        fiche("rec3", "2026-10-13", **{"Fiche mise à jour le": "2026-10-13",
+        fiche("rec1", "2026-10-08", **{"Nouvel adhérent": "Oui",
+                                       "Lien envoyé le": "2026-10-08"}),
+        fiche("rec2", "2026-10-01", **{"Nouvel adhérent": "Oui"}),  # avant la fenêtre
+        fiche("rec3", "2026-10-13", **{"Nouvel adhérent": "Oui",
+                                       "Fiche mise à jour le": "2026-10-13",
                                        "Dernière relance le": "2026-10-12"}),
+        fiche("rec4", "2026-10-09"),  # saisie manuelle : hors flux, pas une adhésion
     ])
     assert comptes["adhesions"] == 2
+    assert comptes["hors_flux"] == 1
     assert comptes["liens_envoyes"] == 1
     assert comptes["fiches_maj"] == 1
     assert comptes["relances"] == 1
-    assert comptes["total_fiches"] == 3
+    assert comptes["total_fiches"] == 4
 
 
 def test_les_dates_iso_completes_sont_comprises():
     comptes = compter([
-        fiche("rec1", "2026-10-08T14:30:00.000Z"),
+        fiche("rec1", "2026-10-08T14:30:00.000Z", **{"Nouvel adhérent": "Oui"}),
     ])
     assert comptes["adhesions"] == 1
 
 
 def test_une_adhesion_sans_lien_est_dite_anomalie():
-    comptes = compter([fiche("rec1", "2026-10-08")])
+    comptes = compter([
+        fiche("rec1", "2026-10-08"),  # saisie manuelle : pas une adhésion
+        fiche("rec2", "2026-10-08", **{"Nouvel adhérent": "Oui"}),
+    ])
     rapport = rendre_rapport(comptes, {}, False, DEBUT, FIN, AUJOURDHUI)
-    assert "un mail de bienvenue n'est pas parti" in rapport
+    assert "1 adhésion(s) sans mail de bienvenue : adherent@example.org" in rapport
+    assert "n'est pas parti" not in rapport # l'ancienne comparaison de totaux
+
+
+def test_une_saisie_manuelle_nest_pas_une_adhesion():
+    comptes = compter([fiche("rec1", "2026-10-08")])  # pas de tampon du flux
+    assert comptes["adhesions"] == 0
+    assert comptes["hors_flux"] == 1
+    assert comptes["hors_flux_adresses"] == ["adherent@example.org"]
+    rapport = rendre_rapport(comptes, {}, False, DEBUT, FIN, AUJOURDHUI)
+    assert "Fiches créées hors flux : 1" in rapport
+    assert "sans mail de bienvenue" not in rapport
 
 
 def test_une_reponse_orpheline_est_dite_anomalie():
@@ -170,3 +189,37 @@ def test_les_dates_dehors_ne_comptent_pas():
     assert _jour("") is None
     assert _jour(None) is None
     assert _jour("pas une date") is None
+
+
+def test_les_deux_formats_de_syslog_se_lisent(tmp_path):
+    # Mesuré sur la prod le 26/10/2026 : rsyslog écrit en RFC 3339, le rapport
+    # ne lisait que le format classique et disait « syslog non lisible ».
+    chemin = tmp_path / "syslog"
+    lignes = [
+        # hors fenêtre : une erreur d'un mois passé ne doit pas être comptée
+        "2026-09-30T18:58:06.000000+00:00 dsi hello_asso_sync.py: "
+        "hello_asso_sync: passage terminé statut=ok vues=87 traitées=0 erreurs=9 "
+        "non_rattachés=0 curseur=2026-09-30T20:58:02\n",
+        "2026-10-12T18:58:06.641851+00:00 dsi hello_asso_sync.py: "
+        "hello_asso_sync: passage terminé statut=ok vues=87 traitées=1 erreurs=0 "
+        "non_rattachés=0 curseur=2026-10-12T20:58:02\n",
+        "Oct 12 10:23:06 dsi relancer_fiches.py: relance_fiche: "
+        "relances_dues=1 relances_envoyées=1 erreurs=2\n",
+        "2026-10-13T09:37:01.000000+00:00 dsi mailinglist_extracter.py: "
+        "mailinglist: échec de synchronisation d'une liste\n",
+    ]
+    chemin.write_text("".join(lignes), encoding="utf-8")
+    lisible, passages = lire_passages_syslog(DEBUT, FIN, chemins=(str(chemin),))
+    assert lisible
+    assert passages["hello_asso_sync"]["derniere"] == "2026-10-12 18:58:06"
+    assert passages["hello_asso_sync"]["erreurs"] == 0  # la ligne hors fenêtre ignorée
+    assert passages["relance_fiche"]["derniere"] == "Oct 12 10:23:06"
+    assert passages["relance_fiche"]["erreurs"] == 2
+    assert "échec de synchronisation" in passages["mailinglist"]["derniere_ligne"]
+
+
+def test_un_syslog_introuvable_reste_silencieux(tmp_path):
+    lisible, passages = lire_passages_syslog(
+        DEBUT, FIN, chemins=(str(tmp_path / "absent"),))
+    assert not lisible
+    assert all(p["derniere"] is None for p in passages.values())

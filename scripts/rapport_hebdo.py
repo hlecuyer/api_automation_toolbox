@@ -5,8 +5,9 @@ Une seule visée : savoir, après déploiement, si tout fonctionne, sans ouvrir
 ni Airtable ni les logs. Un mail court, une section par composant, deux
 familles de faits :
 
-- **les volumétries**, comptées dans la base (adhésions, liens envoyés, fiches
-  mises à jour, relances) : tout champ daté existe déjà, rien n'est à inventer ;
+- **les volumétries**, comptées dans la base (adhésions, fiches créées hors
+  flux, liens envoyés, fiches mises à jour, relances) : tout champ daté existe
+  déjà, rien n'est à inventer ;
 - **la santé des passages**, lue dans le syslog quand il est lisible : un
   rapport qui dirait « 0 événement » trois semaines de suite parce que plus
   rien ne tourne serait le pire des rapports. Les dates des derniers passages
@@ -73,6 +74,45 @@ LIGNES_DE_VIE = {
     "mailinglist": ("mailinglist", None),
 }
 
+# L'horodatage RFC 3339 en tête de ligne (`2026-10-24T22:00:39.641851+00:00`)
+# suivi de l'hôte. L'année, contrairement au format classique, est portée par
+# la ligne. Mesuré sur la prod le 26/10/2026 : sans lui, aucune ligne ne se
+# lit et le rapport annonce « syslog non lisible » depuis un utilisateur qui
+# pourtant le lit (groupe adm, permissions 640 vérifiées).
+LIGNE_SYSLOG_ISO = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\s+\S+\s+(.*)$"
+)
+
+
+def _decouper_ligne_syslog(ligne, annee, mois):
+    """Rend (jour, horodatage lisible, message), ou None si ligne illisible.
+
+    Deux formats cohabitent selon l'hôte : l'horodatage syslog classique
+    (`Oct 24 22:00:39`, l'année absente et supposée courante, ce qui se trompe
+    une fois l'an, la première semaine de janvier sur les lignes de décembre)
+    et le RFC 3339. Rendre les deux, sinon le rapport se tait sur des hôtes
+    pourtant lisibles.
+    """
+    m = LIGNE_SYSLOG_ISO.match(ligne)
+    if m:
+        try:
+            jour = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+        return (jour,
+                "%s-%s-%s %s" % (m.group(1), m.group(2), m.group(3), m.group(4)),
+                m.group(5))
+
+    morceaux = ligne.split(None, 5)
+    if len(morceaux) < 6:
+        return None
+    try:
+        jour = date(annee, mois[morceaux[0]], int(morceaux[1]))
+    except (KeyError, ValueError):
+        return None
+    return jour, "%s %s %s" % (morceaux[0], morceaux[1], morceaux[2]), morceaux[5]
+
+
 LIMITE_RELANCES = 25  # même limite que relancer_fiches : la toucher est un signal
 
 
@@ -126,8 +166,25 @@ def compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui):
     fiches = annuaire.list_records()
     ids_annuaire = {f["id"] for f in fiches}
 
+    # Une « adhésion traitée » est une fiche créée par le flux HelloAsso, et
+    # il la reconnaît à son tampon : `Nouvel adhérent` est posé par
+    # l'upsert à chaque passage (Oui à la création, Non sur une mise à jour).
+    # Une saisie manuelle crée une fiche sans tampon ni lien envoyé : le
+    # 26/10/2026, onze contacts Non Adhérent saisis d'un coup ont été comptés
+    # « adhésions » avec zéro paiement HelloAsso dans la semaine, et l'alerte
+    # « mail de bienvenue non parti » a hurlé pour rien. Elles se comptent à
+    # part, visibles, sans être des adhésions.
     creation = [f for f in fiches
                 if _dans_fenetre(f["fields"].get(CHAMP_DATE_CREATION), debut, fin)]
+    creation_sync = [f for f in creation if f["fields"].get(CHAMP_NOUVEAU)]
+    hors_flux = [f for f in creation if not f["fields"].get(CHAMP_NOUVEAU)]
+    # L'anomalie fondatrice (le mail perdu) se dit par ses adresses : une
+    # fiche créée par le flux sans lien posé dans la fenêtre. Comparer deux
+    # totaux traitées/liens ne prouve rien dès qu'une réadhésion ou une
+    # saisie manuelle s'y glisse — le 26/10 encore.
+    sans_bienvenue = [f["fields"].get(CHAMP_ADRESSE, "?") for f in creation_sync
+                      if not _dans_fenetre(f["fields"].get(CHAMP_LIEN_ENVOYE),
+                                          debut, fin)]
     liens = [f for f in fiches
              if _dans_fenetre(f["fields"].get(CHAMP_LIEN_ENVOYE), debut, fin)]
     maj = [f for f in fiches
@@ -144,12 +201,13 @@ def compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui):
     # adresses sont listées dans le rapport : c'est un mail interne, et une
     # liste d'adresses se lit mieux qu'un compte quand il faut agir.
     repartition = Counter(f["fields"].get(CHAMP_NOUVEAU) or "non renseigné"
-                          for f in creation)
+                          for f in creation_sync)
     adhesions_details = [
         {"email": f["fields"].get(CHAMP_ADRESSE, "?"),
          "nouveau": f["fields"].get(CHAMP_NOUVEAU) or "non renseigné"}
-        for f in creation
+        for f in creation_sync
     ]
+    hors_flux_adresses = [f["fields"].get(CHAMP_ADRESSE, "?") for f in hors_flux]
 
     toutes_reponses = reponses.list_records()
     orphelines = [r for r in toutes_reponses
@@ -161,7 +219,10 @@ def compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui):
     return {
         "total_fiches": len(fiches),
         "dans_groupe": len(dans_groupe),
-        "adhesions": len(creation),
+        "adhesions": len(creation_sync),
+        "hors_flux": len(hors_flux),
+        "hors_flux_adresses": hors_flux_adresses,
+        "sans_bienvenue": sans_bienvenue,
         "repartition_adhesions": dict(repartition),
         "adhesions_details": adhesions_details,
         "liens_envoyes": len(liens),
@@ -177,9 +238,7 @@ def compter_volumetries(annuaire, reponses, id_groupe, debut, fin, aujourdhui):
 def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslog.1")):
     """Les lignes de vie des composants dans la fenêtre, si le syslog est lisible.
 
-    Le timestamp syslog ne porte pas l'année : l'année courante est supposée,
-    ce qui se trompe une fois l'an, la première semaine de janvier sur les
-    lignes de décembre. Volontairement accepté pour un rapport hebdo.
+    Deux formats d'horodatage cohabitent : voir `_decouper_ligne_syslog`.
     """
     annee = date.today().year
     mois = {m: i for i, m in enumerate(
@@ -194,23 +253,18 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
             ouvrir = gzip.open if chemin.endswith(".gz") else open
             with ouvrir(chemin, "rt", encoding="utf-8", errors="replace") as f:
                 for ligne in f:
-                    morceaux = ligne.split(None, 5)
-                    if len(morceaux) < 6:
+                    decoupee = _decouper_ligne_syslog(ligne, annee, mois)
+                    if not decoupee:
                         continue
-                    try:
-                        jour_lu = date(annee, mois[morceaux[0]], int(morceaux[1]))
-                    except (KeyError, ValueError):
-                        continue
+                    jour_lu, horodatage, message = decoupee
                     if not (debut <= jour_lu <= fin):
                         continue
-                    message = morceaux[5]
                     for nom, (prefixe, motif_erreurs) in LIGNES_DE_VIE.items():
                         if prefixe not in message:
                             continue
                         lisible = True
                         entree = trouve[nom]
-                        entree["derniere"] = "%s %s %s" % (
-                            morceaux[0], morceaux[1], morceaux[2])
+                        entree["derniere"] = horodatage
                         entree["derniere_ligne"] = message.strip()
                         if motif_erreurs:
                             m = re.search(motif_erreurs, message)
@@ -225,11 +279,11 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
 def rendre_rapport(comptes, passages, syslog_lisible, debut, fin, aujourdhui):
     """Le texte du rapport, anomalies en tête de section."""
     anomalies = []
-    if comptes["adhesions"] != comptes["liens_envoyes"]:
+    if comptes["sans_bienvenue"]:
         anomalies.append(
-            "⚠ %d adhésion(s) traitée(s) mais %d lien(s) de bienvenue envoyé(s) : "
-            "un mail de bienvenue n'est pas parti."
-            % (comptes["adhesions"], comptes["liens_envoyes"]))
+            "⚠ %d adhésion(s) sans mail de bienvenue : %s."
+            % (len(comptes["sans_bienvenue"]),
+               ", ".join(comptes["sans_bienvenue"])))
     if comptes["orphelines"]:
         anomalies.append("⚠ %d réponse(s) au formulaire sans fiche derrière."
                          % comptes["orphelines"])
@@ -265,6 +319,11 @@ def rendre_rapport(comptes, passages, syslog_lisible, debut, fin, aujourdhui):
                 ", ".join(adresses)))
     lignes += [
         "Liens de bienvenue envoyés : %d" % comptes["liens_envoyes"],
+        "Fiches créées hors flux : %d" % comptes["hors_flux"],
+    ]
+    if comptes["hors_flux_adresses"]:
+        lignes.append("   %s" % ", ".join(comptes["hors_flux_adresses"]))
+    lignes += [
         "Fiches mises à jour : %d" % comptes["fiches_maj"],
         "Relances envoyées : %d" % comptes["relances"],
         "",
@@ -356,11 +415,11 @@ def rendre_rapport_html(comptes, passages, syslog_lisible, debut, fin, aujourdhu
     habillages. La signature est le bloc exact des autres mails.
     """
     anomalies_html = []
-    if comptes["adhesions"] != comptes["liens_envoyes"]:
+    if comptes["sans_bienvenue"]:
         anomalies_html.append(
-            "%d adhésion(s) traitée(s) mais %d lien(s) de bienvenue envoyé(s) : "
-            "un mail de bienvenue n\'est pas parti."
-            % (comptes["adhesions"], comptes["liens_envoyes"]))
+            "%d adhésion(s) sans mail de bienvenue : %s."
+            % (len(comptes["sans_bienvenue"]),
+               ", ".join(comptes["sans_bienvenue"])))
     if comptes["orphelines"]:
         anomalies_html.append("%d réponse(s) au formulaire sans fiche derrière."
                               % comptes["orphelines"])
@@ -403,11 +462,15 @@ def rendre_rapport_html(comptes, passages, syslog_lisible, debut, fin, aujourdhu
         detail_adhesions += _ligne_detail("Nouveaux adhérents", nouveaux)
     if readhesions:
         detail_adhesions += _ligne_detail("Réadhésions", readhesions)
+    if comptes["hors_flux_adresses"]:
+        detail_adhesions += _ligne_detail("Fiches créées hors flux",
+                                         comptes["hors_flux_adresses"])
 
     metriques = ""
     for label, valeur in (
             ("Adhésions traitées", str(comptes["adhesions"])),
             ("Liens de bienvenue envoyés", str(comptes["liens_envoyes"])),
+            ("Fiches créées hors flux", str(comptes["hors_flux"])),
             ("Fiches mises à jour", str(comptes["fiches_maj"])),
             ("Relances envoyées", str(comptes["relances"])),
             ("En attente : fiches à relancer", str(comptes["a_relancer"])),
