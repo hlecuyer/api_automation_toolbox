@@ -643,6 +643,101 @@ PS : Si vous recevez ce mail, cela veut dire que vous n'avez pas encore renouvel
 """
     },
 
+    "Relance AG 2026": {
+        # Contenu validé par la présidente le 26/10/2026 (son mail du même
+        # jour, archivé hors dépôt). Le PS porte l'AG du 20/11 et la demande
+        # de pouvoir : pas de mail d'invitation dédié prévu en plus (éclairci
+        # avec elle).
+        "subject": "Ton adhésion 2026 et l'AG du 20 novembre",
+        "body_text": """Chère amie, cher ami,
+
+tu n'as pas renouvelé en 2026 ton adhésion à La Coop des Communs.
+
+Peut-être est-ce lié à une question d'emploi du temps qui ne te permet pas de dégager beaucoup de disponibilité ; peut-être nos travaux ne sont-ils pas en interaction immédiate avec tes préoccupations ? peut-être est-ce juste un oubli ?
+
+Pour autant, je voulais te dire l'importance que je mets à notre relation et, au-delà, à l'entretien de relations entre tous les membres de la communauté qui participent aux travaux de La Coop des Communs. C'est cela qui permet, à un moment ou un autre, l'émergence de convergences et projets.
+
+Un éventuel désaccord sur les options que La Coop prend est aussi important pour nous.
+
+Notre prochaine AG va décider de l'avenir de notre association, de la façon de procéder à la capitalisation de nos travaux et de déployer notre capacité d'agir.
+
+Ton adhésion compte donc, comme signe de ton attachement à notre rôle et de ton intérêt à l'existence même de la communauté, qui conditionne sa capacité de production.
+
+Voici le lien pour payer via Hello Asso :
+https://www.helloasso.com/associations/la-coop-des-communs/adhesions/adhesion-annee-2026
+
+Si tu as des difficultés avec Hello Asso, tu peux envoyer un chèque à La Coop des Communs au : 20 rue du Cdt Mouchotte – 75014 PARIS
+
+J'espère pouvoir compter sur toi.
+
+Bien cordialement,
+
+@@SIG_NAME@@
+@@SIG_ROLE@@
+@@SIG_PHONE@@
+@@SIG_EMAIL@@
+coopdescommuns.org
+
+PS : et merci de tenter de participer à l'AG du 20 novembre prochain à 14 h. À défaut, peux-tu m'envoyer un pouvoir ?
+""",
+        "body_html": """<html>
+<head></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <p>Chère amie, cher ami,</p>
+
+    <p>tu n'as pas renouvelé en 2026 ton adhésion à La Coop des Communs.</p>
+
+    <p>Peut-être est-ce lié à une question d'emploi du temps qui ne te permet pas de dégager beaucoup de disponibilité ; peut-être nos travaux ne sont-ils pas en interaction immédiate avec tes préoccupations ? peut-être est-ce juste un oubli ?</p>
+
+    <p>Pour autant, je voulais te dire l'importance que je mets à notre relation et, au-delà, à l'entretien de relations entre tous les membres de la communauté qui participent aux travaux de La Coop des Communs. C'est cela qui permet, à un moment ou un autre, l'émergence de convergences et projets.</p>
+
+    <p>Un éventuel désaccord sur les options que La Coop prend est aussi important pour nous.</p>
+
+    <p>Notre prochaine AG va décider de l'avenir de notre association, de la façon de procéder à la capitalisation de nos travaux et de déployer notre capacité d'agir.</p>
+
+    <p>Ton adhésion compte donc, comme signe de ton attachement à notre rôle et de ton intérêt à l'existence même de la communauté, qui conditionne sa capacité de production.</p>
+
+    <p style="margin-top: 25px;">
+        <a href="https://www.helloasso.com/associations/la-coop-des-communs/adhesions/adhesion-annee-2026"
+           style="background-color: #2c5aa0; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block;">
+            Adhérer pour 2026 via Hello Asso
+        </a>
+    </p>
+
+    <p style="font-size: 0.9em; color: #666;">Si tu as des difficultés avec Hello Asso, tu peux envoyer un chèque à La Coop des Communs au : 20 rue du Cdt Mouchotte – 75014 PARIS</p>
+
+    <p>J'espère pouvoir compter sur toi.</p>
+
+    <p>Bien cordialement,</p>
+
+    <table width="400" cellspacing="0" cellpadding="0" border="0" style="margin-top: 20px;">
+        <tr>
+            <td width="124" valign="top" style="padding:0cm 7.5pt 0cm 0cm">
+                <img width="85" height="69" src="cid:logo" style="width:.8854in;height:.7187in">
+            </td>
+            <td style="padding:0cm 0cm 0cm 0cm">
+                <p style="margin:0cm 0cm 3pt 2.25pt">
+                    <b><span style="font-size:9pt;font-family:Poppins;color:#4B4B4D">@@SIG_NAME@@</span></b>
+                    <span style="font-size:9pt;font-family:Poppins"><br>
+                    <span style="color:#3CB1D4">@@SIG_ROLE@@</span></span>
+                </p>
+                <p style="margin:0cm 0cm 3pt 2.25pt">
+                    <span style="font-size:9pt;font-family:Poppins">@@SIG_PHONE@@<br>
+                    <a href="mailto:@@SIG_EMAIL@@"><span style="color:#4B4B4D">@@SIG_EMAIL@@</span></a><br>
+                    <a href="https://coopdescommuns.org/"><span style="color:#4B4B4D">coopdescommuns.org</span></a></span>
+                </p>
+            </td>
+        </tr>
+    </table>
+
+    <p style="font-size: 0.85em; color: #888; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px;">
+        PS : et merci de tenter de participer à l'AG du 20 novembre prochain à 14 h. À défaut, peux-tu m'envoyer un pouvoir ?
+    </p>
+</body>
+</html>
+"""
+    },
+
     "Evenement non adherent": {
         "subject": "Adhésion 2026 - La Coop des Communs",
         "body_text": """Chère amie, cher ami,
