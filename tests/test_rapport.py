@@ -285,6 +285,22 @@ def test_le_fichier_ancien_n_ecrase_pas_le_courant(tmp_path):
     assert passages["mailinglist"]["derniere"] == "2026-10-13 18:37:28"
 
 
+def test_une_commande_ansible_n_est_pas_un_passage(tmp_path):
+    # Le 28/10/2026, un test lancé via ansible a daté la santé de la section :
+    # sa ligne de commande contenait « mailinglist_extracter.py ». Le préfixe
+    # retenu est le tag syslog du programme, pas le mot.
+    chemin = tmp_path / "syslog"
+    chemin.write_text(
+        "2026-10-13T15:23:01.000000+01:00 dsi ansible-ansible.legacy.command: "
+        "Invoked with _raw_params=runuser -u helloasso -- bash -c 'cd … "
+        "./venv/bin/python -c from scripts.rapport_hebdo import …'\n"
+        "2026-10-12T18:37:28.000000+01:00 dsi mailinglist_extracter.py: "
+        "mailinglist_extracter: passage terminé statut=ok listes=30 ajouts=0 "
+        "suppressions=12 erreurs=0\n", encoding="utf-8")
+    _, passages = lire_passages_syslog(DEBUT, FIN, chemins=(str(chemin),))
+    assert passages["mailinglist"]["derniere"] == "2026-10-12 18:37:28"
+
+
 def test_un_syslog_introuvable_reste_silencieux(tmp_path):
     lisible, passages = lire_passages_syslog(
         DEBUT, FIN, chemins=(str(tmp_path / "absent"),))

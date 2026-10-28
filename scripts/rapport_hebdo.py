@@ -71,10 +71,16 @@ CHAMP_GROUPES = "Groupe(s)"
 # première version de ce rapport supposait qu'il n'écrivait que des erreurs et
 # affichait donc « échec » sur un passage réussi : le statut se lit, il ne se
 # suppose pas.
+#
+# Le préfixe du mailinglist est son **tag syslog** (`mailinglist_extracter.py:`),
+# pas le simple mot « mailinglist » : les lignes de cron (`CRON[...]: CMD (…
+# src/mailinglist_extracter.py …)`) et n'importe quelle commande lancée à la
+# main contiennent ce mot, et se faisaient passer pour un passage. Constaté le
+# 28/10/2026 : un test lancé en ansible a daté la santé de la section.
 LIGNES_DE_VIE = {
     "hello_asso_sync": ("hello_asso_sync: passage terminé", "erreurs=(\\d+)"),
     "relance_fiche": ("relance_fiche: relances_dues=", "erreurs=(\\d+)"),
-    "mailinglist": ("mailinglist", None),
+    "mailinglist": ("mailinglist_extracter.py:", None),
 }
 
 # La ligne de vie du mailinglist : `passage terminé statut=ok listes=24
