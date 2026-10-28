@@ -8,8 +8,8 @@ bienvenue, réponses orphelines), et le rapport rendu lisible.
 
 from datetime import date
 
-from scripts.rapport_hebdo import (_jour, compter_volumetries, lire_passages_syslog,
-                                   rendre_rapport)
+from scripts.rapport_hebdo import (_jour, compter_volumetries, etat_mailinglist,
+                                   lire_passages_syslog, rendre_rapport)
 
 AUJOURDHUI = date(2026, 10, 13)
 DEBUT = date(2026, 10, 7)
@@ -176,11 +176,49 @@ def test_un_composant_muet_est_flagge_quand_le_syslog_est_lu():
         "hello_asso_sync": {"derniere": "Oct 13 20:58:01", "erreurs": 0,
                             "derniere_ligne": "hello_asso_sync: passage terminé"},
         "relance_fiche": {"derniere": None, "erreurs": 0, "derniere_ligne": None},
-        "mailinglist": {"derniere": None, "erreurs": 0, "derniere_ligne": None},
+        "mailinglist": {"derniere": None, "erreurs": 0, "derniere_ligne": None,
+                        "derniere_erreur": None, "ligne_erreur": None},
     }
     rapport = rendre_rapport(comptes, passages, True, DEBUT, FIN, AUJOURDHUI)
     assert "relance_fiche : AUCUN passage" in rapport
     assert "hello_asso_sync : dernier passage le Oct 13 20:58:01" in rapport
+
+
+def test_un_passage_mailinglist_reussi_n_est_pas_un_echec():
+    # Le défaut signalé le 26/10/2026 : l'extracter journalise « passage
+    # terminé statut=ok » et le rapport l'affichait « échec le … ».
+    entree = {"derniere": "2026-10-28 12:37:04", "erreurs": 0,
+              "derniere_ligne": "mailinglist_extracter: passage terminé "
+                                "statut=ok listes=24 ajouts=12 suppressions=3 "
+                                "erreurs=0",
+              "derniere_erreur": None, "ligne_erreur": None}
+    assert etat_mailinglist(entree) == (
+        "dernier passage le 2026-10-28 12:37:04, statut ok "
+        "(12 ajouts, 3 suppressions, 0 erreur)")
+    assert "échec" not in etat_mailinglist(entree)
+
+
+def test_un_passage_mailinglist_en_echec_reste_un_echec():
+    entree = {"derniere": "2026-10-28 18:37:04", "erreurs": 0,
+              "derniere_ligne": "mailinglist_extracter: passage terminé "
+                                "statut=échec listes=0 ajouts=0 suppressions=0 "
+                                "erreurs=0",
+              "derniere_erreur": None, "ligne_erreur": None}
+    assert etat_mailinglist(entree).startswith("échec le 2026-10-28 18:37:04")
+
+
+def test_une_erreur_unitaire_ne_se_cache_pas_sous_un_passage_vert():
+    entree = {"derniere": "2026-10-28 18:37:04", "erreurs": 1,
+              "derniere_ligne": "mailinglist_extracter: passage terminé "
+                                "statut=ok listes=24 ajouts=0 suppressions=0 "
+                                "erreurs=1",
+              "derniere_erreur": "2026-10-28 18:37:02",
+              "ligne_erreur": "ERROR: add toto@example.org on listes refused "
+                              "by OVH — other subscribers are still processed"}
+    resume = etat_mailinglist(entree)
+    assert "statut ok" in resume
+    assert "1 erreur(s) unitaire(s)" in resume
+    assert "toto@example.org" in resume
 
 
 def test_les_dates_dehors_ne_comptent_pas():
@@ -215,7 +253,8 @@ def test_les_deux_formats_de_syslog_se_lisent(tmp_path):
     assert passages["hello_asso_sync"]["erreurs"] == 0  # la ligne hors fenêtre ignorée
     assert passages["relance_fiche"]["derniere"] == "Oct 12 10:23:06"
     assert passages["relance_fiche"]["erreurs"] == 2
-    assert "échec de synchronisation" in passages["mailinglist"]["derniere_ligne"]
+    assert "échec de synchronisation" in passages["mailinglist"]["ligne_erreur"]
+    assert passages["mailinglist"]["derniere"] is None  # aucune ligne de vie dans le lot
 
 
 def test_un_syslog_introuvable_reste_silencieux(tmp_path):

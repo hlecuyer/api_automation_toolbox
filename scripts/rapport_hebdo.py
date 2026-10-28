@@ -66,13 +66,62 @@ CHAMP_DERNIERE_RELANCE = "Dernière relance le"
 CHAMP_DESINSCRIT = "désinscrit liste membres"
 CHAMP_GROUPES = "Groupe(s)"
 
-# Les passages qui se signalent en syslog. Le mailinglist n'y écrit que ses
-# échecs : son absence de ligne signifie « aucune erreur », le dire tel quel.
+# Les passages qui se signalent en syslog. Le mailinglist écrit deux familles
+# de lignes : sa ligne de vie (`statut=ok|échec`) et ses erreurs unitaires. La
+# première version de ce rapport supposait qu'il n'écrivait que des erreurs et
+# affichait donc « échec » sur un passage réussi : le statut se lit, il ne se
+# suppose pas.
 LIGNES_DE_VIE = {
     "hello_asso_sync": ("hello_asso_sync: passage terminé", "erreurs=(\\d+)"),
     "relance_fiche": ("relance_fiche: relances_dues=", "erreurs=(\\d+)"),
     "mailinglist": ("mailinglist", None),
 }
+
+# La ligne de vie du mailinglist : `passage terminé statut=ok listes=24
+# ajouts=12 suppressions=3 erreurs=0`.
+STATUT_MAILINGLIST = re.compile(r"passage terminé statut=(?P<statut>ok|échec)")
+
+# Ses erreurs unitaires, qui précèdent la ligne de vie et ne doivent pas
+# disparaître derrière elle : un abonné refusé par OVH journalise en LOG_ERR.
+ERREUR_MAILINGLIST = re.compile(r"ERROR:|échec|refused by OVH|does not exists")
+
+
+def etat_mailinglist(entree):
+    """Ce que disent les passages des mailing lists, sans les supposer.
+
+    Le rapport supposait que l'extracter n'écrivait que ses échecs : il
+    affichait donc « échec » sur un passage réussi. L'extracter écrit en fait
+    une ligne de vie par passage (`statut=ok|échec`), plus des erreurs unitaires
+    quand un abonné se fait refuser.
+
+    Deux faits à dire séparément quand ils coexistent : le dernier passage
+    réussi **et** une erreur unitaire sur la fenêtre. La seconde ne doit pas
+    disparaître sous le premier.
+    """
+    if not entree["derniere"]:
+        if entree["erreurs"]:
+            return "%d erreur(s) unitaire(s) sur la fenêtre, aucune ligne de vie" % (
+                entree["erreurs"])
+        return "aucune ligne sur la fenêtre"
+    ligne = entree["derniere_ligne"] or ""
+    m = STATUT_MAILINGLIST.search(ligne)
+    if not m or m.group("statut") != "ok":
+        return "échec le %s : %s" % (entree["derniere"], ligne)
+    details = []
+    for motif, mot in ((r"ajouts=(\d+)", "ajout"),
+                       (r"suppressions=(\d+)", "suppression"),
+                       (r"erreurs=(\d+)", "erreur")):
+        trouve = re.search(motif, ligne)
+        if not trouve:
+            continue
+        nombre = int(trouve.group(1))
+        details.append("%d %s%s" % (nombre, mot, "s" if nombre > 1 else ""))
+    resume = "dernier passage le %s, statut ok%s" % (
+        entree["derniere"], " (%s)" % ", ".join(details) if details else "")
+    if entree["erreurs"]:
+        resume += " ; %d erreur(s) unitaire(s) sur la fenêtre, la dernière le %s : %s" % (
+            entree["erreurs"], entree["derniere_erreur"], entree["ligne_erreur"])
+    return resume
 
 # L'horodatage RFC 3339 en tête de ligne (`2026-10-24T22:00:39.641851+00:00`)
 # suivi de l'hôte. L'année, contrairement au format classique, est portée par
@@ -244,7 +293,8 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
     mois = {m: i for i, m in enumerate(
         ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), start=1)}
-    trouve = {nom: {"derniere": None, "erreurs": 0, "derniere_ligne": None}
+    trouve = {nom: {"derniere": None, "erreurs": 0, "derniere_ligne": None,
+                    "derniere_erreur": None, "ligne_erreur": None}
               for nom in LIGNES_DE_VIE}
     lisible = False
 
@@ -264,6 +314,21 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
                             continue
                         lisible = True
                         entree = trouve[nom]
+                        if nom == "mailinglist":
+                            # Deux familles de lignes pour ce composant : sa
+                            # ligne de vie, qui date le passage, et ses erreurs
+                            # unitaires, qui se comptent sans effacer la
+                            # précédente. Prendre la dernière ligne venue
+                            # ferait dire « échec » au rapport sur un abonné
+                            # refusé alors que le passage s'est terminé ok.
+                            if STATUT_MAILINGLIST.search(message):
+                                entree["derniere"] = horodatage
+                                entree["derniere_ligne"] = message.strip()
+                            elif ERREUR_MAILINGLIST.search(message):
+                                entree["erreurs"] += 1
+                                entree["derniere_erreur"] = horodatage
+                                entree["ligne_erreur"] = message.strip()
+                            continue
                         entree["derniere"] = horodatage
                         entree["derniere_ligne"] = message.strip()
                         if motif_erreurs:
@@ -339,11 +404,7 @@ def rendre_rapport(comptes, passages, syslog_lisible, debut, fin, aujourdhui):
     if syslog_lisible:
         for nom, entree in passages.items():
             if nom == "mailinglist":
-                lignes.append("  mailinglist : %s" % (
-                    "échec le %s : %s" % (entree["derniere"], entree["derniere_ligne"])
-                    if entree["derniere"] else
-                    "aucune erreur journalisée sur la fenêtre "
-                    "(ce composant ne journalise que ses échecs)"))
+                lignes.append("  mailinglist : %s" % etat_mailinglist(entree))
                 continue
             if entree["derniere"]:
                 lignes.append("  %s : dernier passage le %s, %d erreur(s) sur la fenêtre"
@@ -483,10 +544,7 @@ def rendre_rapport_html(comptes, passages, syslog_lisible, debut, fin, aujourdhu
         lignes_sante = []
         for nom, entree in passages.items():
             if nom == "mailinglist":
-                lignes_sante.append("mailinglist : " + (
-                    "échec le %s" % entree["derniere"] if entree["derniere"]
-                    else "aucune erreur journalisée (ce composant ne journalise "
-                         "que ses échecs)"))
+                lignes_sante.append("mailinglist : " + etat_mailinglist(entree))
             elif entree["derniere"]:
                 lignes_sante.append(
                     "%s : dernier passage le %s, %d erreur(s) sur la fenêtre"
