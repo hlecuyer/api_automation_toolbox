@@ -296,6 +296,14 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
     trouve = {nom: {"derniere": None, "erreurs": 0, "derniere_ligne": None,
                     "derniere_erreur": None, "ligne_erreur": None}
               for nom in LIGNES_DE_VIE}
+    # Le jour de la dernière ligne de vie retenue, pour ne jamais reculer.
+    # `/var/log/syslog` est le fichier courant, `/var/log/syslog.1` le
+    # précédent (rotation) : lus dans cet ordre, le second écrasait le premier
+    # et le rapport annonçait la santé d'il y a trois jours comme si c'était
+    # celle d'aujourd'hui. Constaté le 28/10/2026 : le rapport en simulation
+    # disait « dernier passage le 24/10 » alors que le cron avait tourné à
+    # 12:37 le jour même.
+    jour_derniere = {nom: None for nom in LIGNES_DE_VIE}
     lisible = False
 
     for chemin in chemins:
@@ -314,6 +322,8 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
                             continue
                         lisible = True
                         entree = trouve[nom]
+                        retenu = jour_derniere[nom]
+                        plus_recent = retenu is None or jour_lu >= retenu
                         if nom == "mailinglist":
                             # Deux familles de lignes pour ce composant : sa
                             # ligne de vie, qui date le passage, et ses erreurs
@@ -322,15 +332,20 @@ def lire_passages_syslog(debut, fin, chemins=("/var/log/syslog", "/var/log/syslo
                             # ferait dire « échec » au rapport sur un abonné
                             # refusé alors que le passage s'est terminé ok.
                             if STATUT_MAILINGLIST.search(message):
-                                entree["derniere"] = horodatage
-                                entree["derniere_ligne"] = message.strip()
+                                if plus_recent:
+                                    entree["derniere"] = horodatage
+                                    entree["derniere_ligne"] = message.strip()
+                                    jour_derniere[nom] = jour_lu
                             elif ERREUR_MAILINGLIST.search(message):
                                 entree["erreurs"] += 1
-                                entree["derniere_erreur"] = horodatage
-                                entree["ligne_erreur"] = message.strip()
+                                if plus_recent:
+                                    entree["derniere_erreur"] = horodatage
+                                    entree["ligne_erreur"] = message.strip()
                             continue
-                        entree["derniere"] = horodatage
-                        entree["derniere_ligne"] = message.strip()
+                        if plus_recent:
+                            entree["derniere"] = horodatage
+                            entree["derniere_ligne"] = message.strip()
+                            jour_derniere[nom] = jour_lu
                         if motif_erreurs:
                             m = re.search(motif_erreurs, message)
                             if m:

@@ -257,6 +257,34 @@ def test_les_deux_formats_de_syslog_se_lisent(tmp_path):
     assert passages["mailinglist"]["derniere"] is None  # aucune ligne de vie dans le lot
 
 
+def test_le_fichier_ancien_n_ecrase_pas_le_courant(tmp_path):
+    # Le 28/10/2026, le rapport en simulation annonçait « dernier passage le
+    # 24/10 » alors que le cron avait tourné à 12:37 le jour même : /var/log/syslog
+    # puis /var/log/syslog.1 étaient lus dans cet ordre, et le fichier de la
+    # rotation (le plus ancien) écrasait le courant.
+    courant = tmp_path / "syslog"
+    courant.write_text(
+        "2026-10-13T18:37:28.000000+01:00 dsi mailinglist_extracter.py: "
+        "mailinglist_extracter: passage terminé statut=ok listes=30 ajouts=0 "
+        "suppressions=12 erreurs=0\n", encoding="utf-8")
+    ancien = tmp_path / "syslog.1"
+    ancien.write_text(
+        "2026-10-09T18:37:28.000000+01:00 dsi mailinglist_extracter.py: "
+        "mailinglist_extracter: passage terminé statut=ok listes=30 ajouts=0 "
+        "suppressions=13 erreurs=0\n", encoding="utf-8")
+
+    # Ordre de lecture du code : le courant d'abord, le reste ensuite.
+    _, passages = lire_passages_syslog(
+        DEBUT, FIN, chemins=(str(courant), str(ancien)))
+    assert passages["mailinglist"]["derniere"] == "2026-10-13 18:37:28"
+    assert "suppressions=12" in passages["mailinglist"]["derniere_ligne"]
+
+    # Et l'ordre inverse ne change rien : la date la plus récente gagne.
+    _, passages = lire_passages_syslog(
+        DEBUT, FIN, chemins=(str(ancien), str(courant)))
+    assert passages["mailinglist"]["derniere"] == "2026-10-13 18:37:28"
+
+
 def test_un_syslog_introuvable_reste_silencieux(tmp_path):
     lisible, passages = lire_passages_syslog(
         DEBUT, FIN, chemins=(str(tmp_path / "absent"),))
